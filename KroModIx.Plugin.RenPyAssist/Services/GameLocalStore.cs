@@ -25,6 +25,7 @@ public sealed class GameLocalStore
     private const string StoreDir = ".renpyassist";
     private const string GameJson = "game.json";
     private const string CoverFile = "cover.img";
+    private const string SidebarCoverFile = "sidebar-cover.png";
 
     private static readonly JsonSerializerOptions JsonOpts = new()
     {
@@ -40,6 +41,12 @@ public sealed class GameLocalStore
 
     public static string CoverPath(string containerPath) =>
         Path.Combine(StoreDirFor(containerPath), CoverFile);
+
+    /// <summary>Sidebar-spezifischer Ausschnitt (2:3 Portrait, PNG). Wird vom
+    /// <see cref="Views.CoverCropDialog"/> geschrieben und via
+    /// <c>IHostServices.TrySetManualGameCover</c> als Sidebar-Kachel gesetzt.</summary>
+    public static string SidebarCoverPath(string containerPath) =>
+        Path.Combine(StoreDirFor(containerPath), SidebarCoverFile);
 
     /// <summary>Liest die lokale Config. Null wenn keine da (neuer Container).</summary>
     public static RenPyGame? Load(string containerPath)

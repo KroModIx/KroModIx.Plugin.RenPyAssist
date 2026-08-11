@@ -58,10 +58,16 @@ public sealed class GameSettingsView : UserControl
         var folderBtn = new Button { Content = "📂  Ordner" };
         folderBtn.Classes.Add("ghost");
         folderBtn.Bind(Button.CommandProperty, new Binding(nameof(GameSettingsViewModel.OpenFolderCommand)));
+        var cropBtn = new Button { Content = "🖼  Sidebar-Ausschnitt wählen" };
+        cropBtn.Classes.Add("ghost");
+        cropBtn.Bind(Button.CommandProperty, new Binding(nameof(GameSettingsViewModel.ChooseSidebarCropCommand)));
+        ToolTip.SetTip(cropBtn,
+            "Öffnet einen Dialog mit dem Original-Cover — verschiebe den 2:3-Rahmen " +
+            "und speichere. Der Ausschnitt landet als Sidebar-Kachel.");
         var actionsRow = new StackPanel
         {
             Orientation = Orientation.Horizontal, Spacing = 8,
-            Children = { playBtn, updateBtn, checkBtn, folderBtn },
+            Children = { playBtn, updateBtn, checkBtn, folderBtn, cropBtn },
         };
 
         var gameStatus = new TextBlock { Margin = new Thickness(0, 8, 0, 0) };

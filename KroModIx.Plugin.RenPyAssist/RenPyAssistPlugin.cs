@@ -24,7 +24,7 @@ public sealed class RenPyAssistPlugin : IGameModPlugin, IUpdateNotifier
     public PluginMetadata Metadata { get; } = new(
         Id: "kroste.renpyassist",
         DisplayName: "Ren'Py Assist",
-        Version: "0.5.0",
+        Version: "0.5.1",
         Author: "Kroste",
         Description: "Verwaltet Ren'Py-Spiele als eigenständige Sidebar-Kacheln " +
             "(Multi-Tile). Setup via Host-Wizard '🎮 Ordner mit Spielen scannen' " +

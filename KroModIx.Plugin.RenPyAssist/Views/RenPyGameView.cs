@@ -5,6 +5,7 @@ using Avalonia.Data;
 using Avalonia.Layout;
 using Avalonia.Markup.Xaml.MarkupExtensions;
 using Avalonia.Media;
+using Avalonia.Media.Imaging;
 
 namespace KroModIx.Plugin.RenPyAssist.Views;
 
@@ -65,34 +66,27 @@ public sealed class RenPyGameView : UserControl
         subPath.Classes.Add("secondary");
         subPath.Bind(TextBlock.TextProperty, new Binding(nameof(RenPyGameViewModel.SubPathText)));
 
-        // --- Cover zentriert ---
-        var coverFrame = new Border
+        // --- Cover zentriert (Uniform = kein Crop, komplettes Bild wird
+        //     angezeigt; MaxWidth 700, MaxHeight 700 begrenzt sehr breite
+        //     Landscape-Cover damit die Seite nicht zu weit wird) ---
+        var coverImage = new Image
         {
-            Width = 400, Height = 550,
+            Stretch = Stretch.Uniform,
             HorizontalAlignment = HorizontalAlignment.Center,
-            CornerRadius = new CornerRadius(10),
-            ClipToBounds = true,
+            MaxWidth = 700,
+            MaxHeight = 700,
             Margin = new Thickness(0, 0, 0, 20),
-            [!Border.BackgroundProperty] = new DynamicResourceExtension("KrosteSurfaceBrush"),
         };
-        var coverPanel = new Panel();
+        coverImage.Bind(Image.SourceProperty, new Binding(nameof(RenPyGameViewModel.Cover)));
         var coverFallback = new TextBlock
         {
             Text = "🎮", FontSize = 96,
             HorizontalAlignment = HorizontalAlignment.Center,
-            VerticalAlignment = VerticalAlignment.Center,
+            Margin = new Thickness(0, 40, 0, 40),
         };
         coverFallback.Classes.Add("muted");
-        coverPanel.Children.Add(coverFallback);
-        var coverImage = new Image
-        {
-            Stretch = Stretch.UniformToFill,
-            HorizontalAlignment = HorizontalAlignment.Stretch,
-            VerticalAlignment = VerticalAlignment.Stretch,
-        };
-        coverImage.Bind(Image.SourceProperty, new Binding(nameof(RenPyGameViewModel.Cover)));
-        coverPanel.Children.Add(coverImage);
-        coverFrame.Child = coverPanel;
+        coverFallback.Bind(TextBlock.IsVisibleProperty, new Binding(nameof(RenPyGameViewModel.Cover))
+        { Converter = new Avalonia.Data.Converters.FuncValueConverter<Bitmap?, bool>(v => v is null) });
 
         // --- Beschreibung (KI-übersetzt oder Original) ---
         var descHeader = new TextBlock
@@ -189,7 +183,7 @@ public sealed class RenPyGameView : UserControl
             Children =
             {
                 title, updateBadge, versionInfo, subPath,
-                coverFrame,
+                coverFallback, coverImage,
                 descHeader, descText, translationHint,
                 genreHeader, genrePanel,
                 noThreadHint,

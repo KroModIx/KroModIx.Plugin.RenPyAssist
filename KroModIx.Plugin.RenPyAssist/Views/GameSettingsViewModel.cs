@@ -177,6 +177,51 @@ public sealed partial class GameSettingsViewModel : ObservableObject
         finally { IsBusy = false; }
     }
 
+    /// <summary>Öffnet den <see cref="CoverCropDialog"/> mit dem aktuellen
+    /// Cover als Vorlage. Nach Bestätigung schreibt der Dialog den Ausschnitt
+    /// als PNG in <c>.renpyassist/sidebar-cover.png</c> und wir triggern
+    /// <c>TrySetManualGameCover</c> damit die Sidebar-Kachel den Ausschnitt
+    /// nutzt.</summary>
+    [RelayCommand]
+    private async Task ChooseSidebarCropAsync()
+    {
+        // Cover-Quelle: bevorzugt Local-Cover im Container, sonst Registry.LocalCoverPath.
+        var srcCandidates = new[]
+        {
+            GameLocalStore.CoverPath(_containerPath),
+            _game.LocalCoverPath ?? "",
+        };
+        string? src = null;
+        foreach (var c in srcCandidates)
+            if (!string.IsNullOrEmpty(c) && File.Exists(c)) { src = c; break; }
+        if (src is null)
+        {
+            await _host.Dialogs.ShowMessageAsync("Kein Cover",
+                "Es gibt noch kein Cover-Bild zum Zuschneiden. Erst einen f95zone-" +
+                "Thread eintragen und 🔄 Prüfen klicken.");
+            return;
+        }
+        var outputPath = GameLocalStore.SidebarCoverPath(_containerPath);
+        var dialog = new CoverCropDialog(src, outputPath)
+        {
+            OnCropSaved = path =>
+            {
+                try
+                {
+                    _host.TrySetManualGameCover(_containerPath, path);
+                    _host.Notifications.Notify(
+                        "Sidebar-Ausschnitt gespeichert und gesetzt.",
+                        NotificationLevel.Success);
+                }
+                catch (Exception ex) { _host.Logger.Warn(ex, "TrySetManualGameCover nach Crop fehlgeschlagen"); }
+            },
+        };
+        var owner = Avalonia.Application.Current?.ApplicationLifetime
+            is Avalonia.Controls.ApplicationLifetimes.IClassicDesktopStyleApplicationLifetime desk
+            ? desk.MainWindow : null;
+        if (owner is not null) await dialog.ShowDialog(owner); else dialog.Show();
+    }
+
     [RelayCommand]
     private void OpenFolder()
     {
