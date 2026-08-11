@@ -112,9 +112,57 @@ public sealed class GameUpdateInstaller
                 }
             }
 
-            // 5. Registry aktualisieren.
+            // 5. ZIP archivieren im Container/archive/ — für spätere Reinstalls,
+            //    Rollbacks und Backup-Zwecke wandert die Original-ZIP ins Spiel-
+            //    Verzeichnis mit.
+            try
+            {
+                var archiveDir = Path.Combine(game.ContainerPath, "archive");
+                Directory.CreateDirectory(archiveDir);
+                var archiveTarget = Path.Combine(archiveDir, Path.GetFileName(zipPath));
+                if (!string.Equals(Path.GetFullPath(zipPath), Path.GetFullPath(archiveTarget),
+                        StringComparison.OrdinalIgnoreCase))
+                {
+                    File.Copy(zipPath, archiveTarget, overwrite: true);
+                    Log.Info("ZIP archiviert: {From} → {To}", zipPath, archiveTarget);
+                }
+            }
+            catch (Exception ex)
+            {
+                Log.Warn(ex, "ZIP-Archivierung fehlgeschlagen (nicht kritisch)");
+            }
+
+            // 6. Alten Sub-Ordner löschen (User-Wunsch v0.8.1: kein Safety-Net
+            //    mehr). Nur wenn wirklich ein alter Sub-Path existierte UND
+            //    er nicht identisch zum neuen ist (defensive check).
+            if (!string.IsNullOrEmpty(oldSubPath)
+                && !string.Equals(oldSubPath, newSubName, StringComparison.Ordinal))
+            {
+                var oldFullDir = Path.Combine(game.ContainerPath, oldSubPath);
+                if (Directory.Exists(oldFullDir))
+                {
+                    try
+                    {
+                        Directory.Delete(oldFullDir, recursive: true);
+                        Log.Info("Alter Sub-Ordner gelöscht: {Old}", oldFullDir);
+                    }
+                    catch (Exception ex)
+                    {
+                        Log.Warn(ex, "Auto-Delete des alten Sub-Ordners fehlgeschlagen: {Old}", oldFullDir);
+                    }
+                }
+            }
+
+            // 7. Registry aktualisieren — LocalVersion aus neuem Sub-Ordner-Namen.
+            //    LastRemoteVersion auf LocalVersion setzen: der User hat gerade
+            //    das aktuelle Remote-Update installiert, ergo HasUpdate=false.
+            //    Version-Format-Mismatches (v0.1.3 vs 0.1.3) waeren sonst ein
+            //    Problem. Der nächste Worker-Check holt frisch — falls wirklich
+            //    ein noch neueres Update rauskommt, zeigt der Badge dann wieder.
             game.ActiveSubPath = newSubName;
             game.LocalVersion = RenPyGameDetector.ExtractVersion(newSubName);
+            if (!string.IsNullOrEmpty(game.LocalVersion))
+                game.LastRemoteVersion = game.LocalVersion;
             _registry.Update(game);
 
             return InstallResult.Ok(newSubName, oldSubPath);

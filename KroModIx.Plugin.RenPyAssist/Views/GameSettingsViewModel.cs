@@ -152,7 +152,8 @@ public sealed partial class GameSettingsViewModel : ObservableObject
         if (zip is null) return;
         var ok = await _host.Dialogs.ConfirmAsync("Update installieren",
             $"ZIP wird in „{_game.ContainerPath}\" entpackt. Save-Games werden aus dem alten " +
-            $"Sub-Ordner in den neuen kopiert.\n\nFortfahren?");
+            $"Sub-Ordner in den neuen kopiert. Der alte Sub-Ordner wird anschließend " +
+            $"gelöscht. Die ZIP-Datei wird in „archive/\" archiviert.\n\nFortfahren?");
         if (!ok) return;
         try
         {
@@ -166,6 +167,10 @@ public sealed partial class GameSettingsViewModel : ObservableObject
                     NotificationLevel.Success);
                 GameStatus = "Update fertig.";
                 RefreshFromRegistry();
+                // Sidebar-Kachel-Badge muss sofort verschwinden — ohne
+                // Trigger würde die 60s-Periodik greifen.
+                try { await _host.RequestUpdateBadgeRefreshAsync(); }
+                catch { }
             }
             else
             {
