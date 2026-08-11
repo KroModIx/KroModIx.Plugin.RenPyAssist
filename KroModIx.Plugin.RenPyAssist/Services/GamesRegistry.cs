@@ -174,6 +174,28 @@ public sealed class GamesRegistry
         Changed?.Invoke(this, EventArgs.Empty);
     }
 
+    /// <summary>v0.10: nach einem Container-Ordner-Rename den Registry-Eintrag
+    /// vom alten auf den neuen Pfad umbiegen. Container-Local-Store
+    /// (<c>.renpyassist/game.json</c>) ist nicht betroffen — der wanderte mit
+    /// dem Ordner. Wenn kein Eintrag für <paramref name="oldPath"/> existiert,
+    /// legt die Methode einen frischen aus <paramref name="newPath"/> an.</summary>
+    public void Rekey(string oldPath, string newPath)
+    {
+        lock (_lock)
+        {
+            var entry = _games.FirstOrDefault(g =>
+                string.Equals(g.ContainerPath, oldPath, StringComparison.OrdinalIgnoreCase));
+            if (entry is null)
+            {
+                EnsureFromContainer(newPath);
+                return;
+            }
+            entry.ContainerPath = newPath;
+        }
+        Save();
+        Changed?.Invoke(this, EventArgs.Empty);
+    }
+
     /// <summary>Anzahl Spiele mit verfügbarem Update — für den Sidebar-
     /// Kachel-Badge via IUpdateNotifier.</summary>
     public int PendingUpdatesCount

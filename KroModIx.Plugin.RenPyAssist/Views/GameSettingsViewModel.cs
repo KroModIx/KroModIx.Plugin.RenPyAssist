@@ -24,7 +24,11 @@ public sealed partial class GameSettingsViewModel : ObservableObject
     private readonly RenPyWorker _worker;
     private readonly GameUpdateInstaller _installer;
     private readonly IHostServices _host;
-    private readonly string _containerPath;
+    // Nach RenameFolder mutable — der Detail-View wird beim Kachel-Klick
+    // ohnehin neu gebaut (via ManualGameRenamed-Event im Host), aber solange
+    // dieses VM lebt zeigen die restlichen Actions (Play, Open Folder, Check)
+    // auf den neuen Pfad.
+    private string _containerPath;
 
     private RenPyGame _game;
 
@@ -234,6 +238,89 @@ public sealed partial class GameSettingsViewModel : ObservableObject
             ? _game.ContainerPath
             : Path.Combine(_game.ContainerPath, _game.ActiveSubPath!);
         _host.Shell.OpenDirectory(path);
+    }
+
+    /// <summary>v0.10: benennt den Container-Ordner auf der Platte um.
+    /// Der Sidebar-Kachel-Titel folgt dem Ordnernamen (Host bezieht ihn aus
+    /// <c>ManualGameEntry.DisplayName</c>, den er beim initialen Bulk-Add aus
+    /// dem Ordner-Basename gebildet hat — hier bleibt er unangetastet, aber
+    /// der neue Ordner ist im Filesystem der Wahrheit).
+    ///
+    /// <para>Ablauf: Text-Prompt (neuer Basename) → Directory.Move →
+    /// GamesRegistry.Rekey → GameLocalStore folgt automatisch (er wandert
+    /// mit dem Ordner) → <c>IHostServices.TryRenameManualGame</c> re-keyed
+    /// die Host-Sidebar-Kachel und triggert Detail-View-Rebuild.</para></summary>
+    [RelayCommand]
+    private async Task RenameFolderAsync()
+    {
+        var oldPath = _containerPath;
+        var oldName = Path.GetFileName(oldPath);
+        var parent = Path.GetDirectoryName(oldPath);
+        if (string.IsNullOrEmpty(parent) || !Directory.Exists(oldPath))
+        {
+            await _host.Dialogs.ShowMessageAsync("Ordner umbenennen",
+                $"Container-Ordner existiert nicht:\n{oldPath}");
+            return;
+        }
+
+        var newName = await TextInputDialog.PromptAsync(
+            title: "Ordner umbenennen",
+            message: $"Neuer Ordnername für „{oldName}\":\n(Der Container-Ordner auf der Platte wird umbenannt. Container-lokale Metadaten in .renpyassist/ wandern mit.)",
+            initialValue: oldName,
+            acceptLabel: "Umbenennen");
+        if (string.IsNullOrWhiteSpace(newName)) return;
+        // Basename-Validierung: keine Path-Separatoren, keine reservierten Zeichen.
+        if (newName.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0)
+        {
+            await _host.Dialogs.ShowMessageAsync("Ordner umbenennen",
+                "Der Name enthält ungültige Zeichen (/, \\, :, *, ?, \", <, >, |).");
+            return;
+        }
+        if (string.Equals(newName, oldName, StringComparison.Ordinal)) return;
+
+        var newPath = Path.Combine(parent, newName);
+        if (Directory.Exists(newPath) || File.Exists(newPath))
+        {
+            await _host.Dialogs.ShowMessageAsync("Ordner umbenennen",
+                $"Zielpfad existiert bereits:\n{newPath}");
+            return;
+        }
+
+        try
+        {
+            IsBusy = true;
+            GameStatus = "Benenne Ordner um …";
+            // Directory.Move ist auf demselben Filesystem atomar (rename(2)),
+            // über FS-Grenzen ein Copy+Delete — dann längere Laufzeit, aber
+            // wir tolerieren das.
+            Directory.Move(oldPath, newPath);
+
+            // Registry re-keyen (In-Memory + JSON)
+            _registry.Rekey(oldPath, newPath);
+            _containerPath = newPath;
+            _game = _registry.Find(newPath) ?? _game;
+
+            // Host: Manual-Kachel re-keyen (nur bei Contracts v1.10.3+, sonst
+            // no-op). Bei no-op: Kachel verwaist bis App-Neustart.
+            var hostAccepted = _host.TryRenameManualGame(oldPath, newPath);
+
+            _host.Notifications.Notify(
+                hostAccepted
+                    ? $"Ordner umbenannt: „{oldName}\" → „{newName}\""
+                    : $"Ordner umbenannt (Host-Kachel wird beim Neustart nachgezogen)",
+                NotificationLevel.Success);
+            GameStatus = "Ordner umbenannt.";
+            OnPropertyChanged(nameof(ContainerPathText));
+            OnPropertyChanged(nameof(DisplayName));
+        }
+        catch (Exception ex)
+        {
+            _host.Logger.Warn(ex, "Rename fehlgeschlagen: {Old} → {New}", oldPath, newPath);
+            await _host.Dialogs.ShowMessageAsync("Ordner umbenennen",
+                $"Umbenennen fehlgeschlagen:\n{ex.Message}");
+            GameStatus = "Rename fehlgeschlagen.";
+        }
+        finally { IsBusy = false; }
     }
 
     [RelayCommand]

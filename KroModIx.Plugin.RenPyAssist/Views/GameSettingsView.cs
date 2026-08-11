@@ -58,6 +58,12 @@ public sealed class GameSettingsView : UserControl
         var folderBtn = new Button { Content = "📂  Ordner" };
         folderBtn.Classes.Add("ghost");
         folderBtn.Bind(Button.CommandProperty, new Binding(nameof(GameSettingsViewModel.OpenFolderCommand)));
+        var renameBtn = new Button { Content = "✏  Ordner umbenennen" };
+        renameBtn.Classes.Add("ghost");
+        renameBtn.Bind(Button.CommandProperty, new Binding(nameof(GameSettingsViewModel.RenameFolderCommand)));
+        ToolTip.SetTip(renameBtn,
+            "Benennt den Container-Ordner auf der Platte um. .renpyassist/-Metadaten " +
+            "wandern mit. Sidebar-Kachel und Detail-View werden re-keyed.");
         var cropBtn = new Button { Content = "🖼  Sidebar-Ausschnitt wählen" };
         cropBtn.Classes.Add("ghost");
         cropBtn.Bind(Button.CommandProperty, new Binding(nameof(GameSettingsViewModel.ChooseSidebarCropCommand)));
@@ -67,7 +73,7 @@ public sealed class GameSettingsView : UserControl
         var actionsRow = new StackPanel
         {
             Orientation = Orientation.Horizontal, Spacing = 8,
-            Children = { playBtn, updateBtn, checkBtn, folderBtn, cropBtn },
+            Children = { playBtn, updateBtn, checkBtn, folderBtn, renameBtn, cropBtn },
         };
 
         var gameStatus = new TextBlock { Margin = new Thickness(0, 8, 0, 0) };
