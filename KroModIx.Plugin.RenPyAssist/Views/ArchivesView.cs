@@ -101,10 +101,18 @@ public sealed class ArchivesView : UserControl
             HorizontalAlignment = HorizontalAlignment.Center,
             VerticalAlignment = VerticalAlignment.Top,
             MaxHeight = 600,
+            Cursor = new Avalonia.Input.Cursor(Avalonia.Input.StandardCursorType.Hand),
         };
         previewImage.Bind(Image.SourceProperty, new Binding(nameof(ArchivesViewModel.PreviewImage)));
         previewImage.Bind(Image.IsVisibleProperty, new Binding(nameof(ArchivesViewModel.PreviewImage))
         { Converter = Avalonia.Data.Converters.ObjectConverters.IsNotNull });
+        // Video-Thumbnail-Klick öffnet extern (System-Default-Player).
+        previewImage.PointerPressed += (_, _) =>
+        {
+            if (DataContext is ArchivesViewModel vm && vm.CanPlayExternal)
+                vm.OpenExternalCommand.Execute(null);
+        };
+        ToolTip.SetTip(previewImage, "Klick öffnet Video im System-Default-Player");
 
         var previewText = new TextBox
         {

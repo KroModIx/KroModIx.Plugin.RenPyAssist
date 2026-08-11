@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -92,6 +93,11 @@ public sealed class RenPyWorker : IAsyncDisposable
                 game.LastCheckedUtc = DateTime.UtcNow;
                 if (string.IsNullOrWhiteSpace(game.CoverUrl) && !string.IsNullOrWhiteSpace(info.CoverUrl))
                     game.CoverUrl = info.CoverUrl;
+                // v0.5: Description + Genre aus Thread übernehmen wenn gefunden
+                if (!string.IsNullOrWhiteSpace(info.Description))
+                    game.Description = info.Description;
+                if (info.Genres.Count > 0)
+                    game.Genres = new List<string>(info.Genres);
                 _registry.Update(game);
             }
             catch (Exception ex)

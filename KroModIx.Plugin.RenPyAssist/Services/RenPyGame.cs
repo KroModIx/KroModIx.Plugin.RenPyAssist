@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Text.Json.Serialization;
 
 namespace KroModIx.Plugin.RenPyAssist.Services;
@@ -50,6 +51,26 @@ public sealed class RenPyGame
     /// <summary>Optional User-Override für den Anzeige-Namen.</summary>
     [JsonPropertyName("displayNameOverride")]
     public string? DisplayNameOverride { get; set; }
+
+    /// <summary>Kurzbeschreibung aus dem f95zone-Thread (Overview-Sektion).
+    /// Wird vom Worker beim Thread-Check aktualisiert. v0.5+.</summary>
+    [JsonPropertyName("description")]
+    public string? Description { get; set; }
+
+    /// <summary>Genre-Tags aus dem f95zone-Thread (z. B. "3DCG", "Romance",
+    /// "Corruption"). v0.5+.</summary>
+    [JsonPropertyName("genres")]
+    public List<string> Genres { get; set; } = new();
+
+    /// <summary>KI-übersetzte Beschreibung (Sprach-Code → Text). Cache pro
+    /// Locale, damit nicht bei jedem View-Open neu übersetzt wird. v0.5+.</summary>
+    [JsonPropertyName("descriptionTranslations")]
+    public Dictionary<string, string> DescriptionTranslations { get; set; } = new();
+
+    /// <summary>Lokal gecachter Cover-Pfad im Container (relativ zum
+    /// Container-Ordner: <c>.renpyassist/cover.img</c>). v0.5+.</summary>
+    [JsonPropertyName("localCoverPath")]
+    public string? LocalCoverPath { get; set; }
 
     [JsonIgnore]
     public string DisplayName => !string.IsNullOrWhiteSpace(DisplayNameOverride) ? DisplayNameOverride! : Name;

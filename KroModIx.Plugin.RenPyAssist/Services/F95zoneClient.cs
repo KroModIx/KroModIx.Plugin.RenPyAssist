@@ -94,8 +94,10 @@ public sealed class F95zoneClient : IDisposable
     }
 
     /// <summary>Lädt einen einzelnen Thread und extrahiert Titel, Versions-
-    /// String und Cover-Bild-URL. Titel/Version aus <c>og:title</c>, Cover
-    /// aus dem ersten <c>attachments.f95zone.*</c>-Full-Size-Bild.</summary>
+    /// String, Cover-Bild-URL, Beschreibung und Genre-Tags. Titel/Version aus
+    /// <c>og:title</c>, Cover aus dem ersten <c>attachments.f95zone.*</c>-
+    /// Full-Size-Bild, Beschreibung aus dem ersten Post-Body (Overview-
+    /// Sektion), Genre aus den Prefix-Tags im Titel-Header.</summary>
     public async Task<F95ThreadInfo?> FetchThreadInfoAsync(string threadUrl, CancellationToken ct = default)
     {
         Uri url = new(threadUrl);
@@ -106,7 +108,9 @@ public sealed class F95zoneClient : IDisposable
         if (title is null) return null;
         var version = ExtractVersion(title);
         var coverUrl = ExtractCoverUrl(html);
-        return new F95ThreadInfo(threadUrl, title, version, coverUrl);
+        var description = ExtractDescription(html);
+        var genres = ExtractGenres(html);
+        return new F95ThreadInfo(threadUrl, title, version, coverUrl, description, genres);
     }
 
     /// <summary>Cover-Image herunterladen. Nutzt die Session-Cookies
@@ -195,6 +199,82 @@ public sealed class F95zoneClient : IDisposable
         return loose.Success ? loose.Groups[1].Value : null;
     }
 
+    // Der erste Post im Thread — meist mit "Overview:" oder direkt beschreibend.
+    // Wir suchen einen div.bbWrapper (XenForo-Standard-Post-Body).
+    private static readonly Regex FirstPostBodyPattern = new(
+        @"<div\s+class=""bbWrapper"">(.*?)</div>\s*(?=<div\s+class=""message-content"" |<article|<footer|$)",
+        RegexOptions.Compiled | RegexOptions.Singleline | RegexOptions.IgnoreCase);
+
+    // "Overview:"-Block extrahieren wenn präsent, sonst gesamten Post.
+    private static readonly Regex OverviewSectionPattern = new(
+        @"(?:<b>|<strong>)?\s*Overview\s*:?\s*(?:</b>|</strong>)?\s*<br\s*/?>\s*(.*?)(?=<b>|<strong>|<hr|<a\s+href|<img|<div\s+class=""bbCodeBlock)",
+        RegexOptions.Compiled | RegexOptions.Singleline | RegexOptions.IgnoreCase);
+
+    private static string? ExtractDescription(string html)
+    {
+        var body = FirstPostBodyPattern.Match(html);
+        if (!body.Success) return null;
+        var bodyHtml = body.Groups[1].Value;
+        var overview = OverviewSectionPattern.Match(bodyHtml);
+        string text = overview.Success ? overview.Groups[1].Value : bodyHtml;
+        text = StripHtml(text);
+        text = text.Trim();
+        if (text.Length > 2000) text = text[..2000] + "…";
+        return string.IsNullOrWhiteSpace(text) ? null : text;
+    }
+
+    /// <summary>Genre-Tags aus dem Thread-Header. F95zone rendert sie in einem
+    /// <c>bbCodeSpoiler</c>-Container nach dem Titel; als Fallback nutzen wir
+    /// die <c>meta name="keywords"</c>-Zeile.</summary>
+    private static readonly Regex GenreSpoilerPattern = new(
+        @"<div\s+class=""bbCodeSpoiler-content[^""]*"">\s*<div[^>]*>\s*([^<]{20,500})\s*</div>",
+        RegexOptions.Compiled | RegexOptions.IgnoreCase);
+    private static readonly Regex KeywordsMetaPattern = new(
+        @"<meta\s+name=""keywords""\s+content=""([^""]+)""",
+        RegexOptions.Compiled | RegexOptions.IgnoreCase);
+    private static IReadOnlyList<string> ExtractGenres(string html)
+    {
+        // f95zone Genre-Sektion enthält typischerweise ein "Genre:"-Label
+        // gefolgt von einem Spoiler-Block mit Komma-getrennten Tags.
+        // Sample: "3DCG, Big ass, Big tits, Corruption, ..."
+        int genreIdx = html.IndexOf("Genre", StringComparison.OrdinalIgnoreCase);
+        if (genreIdx > 0)
+        {
+            var slice = html.Substring(genreIdx, Math.Min(3000, html.Length - genreIdx));
+            var m = GenreSpoilerPattern.Match(slice);
+            if (m.Success)
+            {
+                return SplitTags(WebUtility.HtmlDecode(m.Groups[1].Value));
+            }
+        }
+        // Fallback: Meta-Keywords
+        var kw = KeywordsMetaPattern.Match(html);
+        if (kw.Success)
+        {
+            return SplitTags(WebUtility.HtmlDecode(kw.Groups[1].Value))
+                .Take(20).ToList();
+        }
+        return Array.Empty<string>();
+    }
+
+    private static IReadOnlyList<string> SplitTags(string csv) =>
+        csv.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+           .Where(t => t.Length is > 1 and < 40)
+           .Distinct(StringComparer.OrdinalIgnoreCase)
+           .ToList();
+
+    // XenForo-BBCode-HTML → Plaintext. Behält Zeilenumbrüche bei <br> und </p>.
+    private static readonly Regex HtmlTagPattern = new(@"<[^>]+>", RegexOptions.Compiled);
+    private static string StripHtml(string html)
+    {
+        html = Regex.Replace(html, @"<br\s*/?>", "\n", RegexOptions.IgnoreCase);
+        html = Regex.Replace(html, @"</p>", "\n\n", RegexOptions.IgnoreCase);
+        html = HtmlTagPattern.Replace(html, "");
+        html = WebUtility.HtmlDecode(html);
+        html = Regex.Replace(html, @"\n{3,}", "\n\n");
+        return html;
+    }
+
     private static readonly Regex QuicksearchThreadPattern = new(
         @"<a\s+[^>]*href=""(/threads/[^""]+)""[^>]*>\s*<span[^>]*>([^<]+)</span>",
         RegexOptions.Compiled);
@@ -229,7 +309,9 @@ public sealed record F95ThreadInfo(
     string Url,
     string Title,
     string? Version,
-    string? CoverUrl);
+    string? CoverUrl,
+    string? Description,
+    IReadOnlyList<string> Genres);
 
 public sealed class F95zoneAuthException : Exception
 {

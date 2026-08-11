@@ -86,7 +86,12 @@ public sealed class GamesRegistry
     /// eine eigene Sidebar-Kachel an. Diese Methode wird pro DetectedGame
     /// aufgerufen und legt den Registry-Eintrag an falls er noch nicht
     /// existiert. Bei existierendem Eintrag: ActiveSubPath/LocalVersion aus
-    /// dem Filesystem aktualisieren, f95zone-Metadata bleibt.</summary>
+    /// dem Filesystem aktualisieren, f95zone-Metadata bleibt.
+    ///
+    /// <para><b>v0.5-Storage-Priorität:</b> zuerst lokal im Container gucken
+    /// (<see cref="GameLocalStore"/>) — die Datei wandert mit dem Ordner. Nur
+    /// wenn keine da, den zentralen Cache-Eintrag prüfen. Bei Änderungen
+    /// werden beide aktualisiert (Container = Wahrheit, Cache = Index).</para></summary>
     public RenPyGame EnsureFromContainer(string containerPath)
     {
         var detected = RenPyGameDetector.DetectOne(containerPath);
@@ -94,6 +99,16 @@ public sealed class GamesRegistry
         {
             var existing = _games.FirstOrDefault(g =>
                 string.Equals(g.ContainerPath, containerPath, StringComparison.OrdinalIgnoreCase));
+
+            // Container-Local-Store hat immer Vorrang (User könnte Config von
+            // anderem PC mitgebracht haben).
+            var local = GameLocalStore.Load(containerPath);
+            if (local is not null)
+            {
+                if (existing is null) { _games.Add(local); existing = local; }
+                else MergeInto(existing, local);
+            }
+
             if (existing is null)
             {
                 var newGame = detected ?? new RenPyGame
@@ -102,6 +117,7 @@ public sealed class GamesRegistry
                     ContainerPath = containerPath,
                 };
                 _games.Add(newGame);
+                GameLocalStore.Save(newGame);
                 Save();
                 Changed?.Invoke(this, EventArgs.Empty);
                 return newGame;
@@ -111,9 +127,26 @@ public sealed class GamesRegistry
                 existing.ActiveSubPath = detected.ActiveSubPath;
                 existing.LocalVersion = detected.LocalVersion;
             }
+            GameLocalStore.Save(existing);
             Save();
             return existing;
         }
+    }
+
+    /// <summary>Merge Container-Local-Fields in bestehenden Registry-Eintrag.
+    /// Local hat Vorrang für f95zone-Metadata (User-editiert), Registry hat
+    /// Vorrang für ActiveSubPath/LocalVersion (aus Filesystem).</summary>
+    private static void MergeInto(RenPyGame target, RenPyGame local)
+    {
+        if (!string.IsNullOrEmpty(local.ThreadUrl)) target.ThreadUrl = local.ThreadUrl;
+        if (!string.IsNullOrEmpty(local.LastRemoteVersion)) target.LastRemoteVersion = local.LastRemoteVersion;
+        if (local.LastCheckedUtc is not null) target.LastCheckedUtc = local.LastCheckedUtc;
+        if (!string.IsNullOrEmpty(local.CoverUrl)) target.CoverUrl = local.CoverUrl;
+        if (!string.IsNullOrEmpty(local.DisplayNameOverride)) target.DisplayNameOverride = local.DisplayNameOverride;
+        if (!string.IsNullOrEmpty(local.Description)) target.Description = local.Description;
+        if (local.Genres.Count > 0) target.Genres = local.Genres;
+        if (local.DescriptionTranslations.Count > 0) target.DescriptionTranslations = local.DescriptionTranslations;
+        if (!string.IsNullOrEmpty(local.LocalCoverPath)) target.LocalCoverPath = local.LocalCoverPath;
     }
 
     public void Update(RenPyGame updated)
@@ -125,6 +158,7 @@ public sealed class GamesRegistry
             if (idx >= 0) _games[idx] = updated;
             else _games.Add(updated);
         }
+        GameLocalStore.Save(updated);
         Save();
         Changed?.Invoke(this, EventArgs.Empty);
     }

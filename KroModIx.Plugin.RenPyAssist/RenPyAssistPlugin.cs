@@ -24,7 +24,7 @@ public sealed class RenPyAssistPlugin : IGameModPlugin, IUpdateNotifier
     public PluginMetadata Metadata { get; } = new(
         Id: "kroste.renpyassist",
         DisplayName: "Ren'Py Assist",
-        Version: "0.4.0",
+        Version: "0.5.0",
         Author: "Kroste",
         Description: "Verwaltet Ren'Py-Spiele als eigenständige Sidebar-Kacheln " +
             "(Multi-Tile). Setup via Host-Wizard '🎮 Ordner mit Spielen scannen' " +
@@ -59,6 +59,8 @@ public sealed class RenPyAssistPlugin : IGameModPlugin, IUpdateNotifier
     private RenpyArchiveService? _rpaService;
     private RenpySaveService? _saveService;
     private MediaPreviewService? _previewService;
+    // v0.5: KI-Übersetzung (Beschreibung → System-Locale)
+    private AiTranslator? _translator;
     private IReadOnlyList<DetectedGame> _activatedGames = Array.Empty<DetectedGame>();
 
     public Task InitializeAsync(IHostServices host, IReadOnlyList<DetectedGame> activatedGames, CancellationToken ct)
@@ -76,6 +78,7 @@ public sealed class RenPyAssistPlugin : IGameModPlugin, IUpdateNotifier
         _rpaService = new RenpyArchiveService();
         _saveService = new RenpySaveService();
         _previewService = new MediaPreviewService();
+        _translator = new AiTranslator(host);
         _activatedGames = activatedGames;
 
         var cookieBlob = _sessionStore.Load();
@@ -125,13 +128,15 @@ public sealed class RenPyAssistPlugin : IGameModPlugin, IUpdateNotifier
         if (_host is null || _settings is null || _registry is null
             || _f95 is null || _sessionStore is null || _covers is null
             || _worker is null || _installer is null
-            || _rpaService is null || _saveService is null || _previewService is null)
+            || _rpaService is null || _saveService is null || _previewService is null
+            || _translator is null)
             yield break;
 
-        yield return new GameDetailTab(_registry, _f95, _covers, _worker, _installer, _host);
+        yield return new GameDetailTab(_registry, _covers, _translator, _host);
         yield return new ArchivesTab(_rpaService, _previewService, _registry, _host);
         yield return new SavesTab(_saveService, _registry, _host);
-        yield return new SettingsTab(_settings, _f95, _sessionStore, _host);
+        yield return new GameSettingsTab(_registry, _settings, _f95, _sessionStore,
+            _worker, _installer, _host);
     }
 
     public async Task ShutdownAsync()
@@ -173,17 +178,15 @@ public sealed class RenPyAssistPlugin : IGameModPlugin, IUpdateNotifier
     private sealed class GameDetailTab : IGameTabContribution
     {
         private readonly GamesRegistry _registry;
-        private readonly F95zoneClient _f95;
         private readonly CoverCache _covers;
-        private readonly RenPyWorker _worker;
-        private readonly GameUpdateInstaller _installer;
+        private readonly AiTranslator _translator;
         private readonly IHostServices _host;
 
-        public GameDetailTab(GamesRegistry registry, F95zoneClient f95, CoverCache covers,
-            RenPyWorker worker, GameUpdateInstaller installer, IHostServices host)
+        public GameDetailTab(GamesRegistry registry, CoverCache covers,
+            AiTranslator translator, IHostServices host)
         {
-            _registry = registry; _f95 = f95; _covers = covers;
-            _worker = worker; _installer = installer; _host = host;
+            _registry = registry; _covers = covers;
+            _translator = translator; _host = host;
         }
 
         public string Id => "game";
@@ -197,8 +200,7 @@ public sealed class RenPyAssistPlugin : IGameModPlugin, IUpdateNotifier
             var entry = _registry.EnsureFromContainer(game.InstallDir);
             return new RenPyGameView
             {
-                DataContext = new RenPyGameViewModel(entry, _registry, _f95, _covers,
-                    _worker, _installer, _host),
+                DataContext = new RenPyGameViewModel(entry, _registry, _covers, _translator, _host),
             };
         }
     }
@@ -259,17 +261,23 @@ public sealed class RenPyAssistPlugin : IGameModPlugin, IUpdateNotifier
         }
     }
 
-    private sealed class SettingsTab : IGameTabContribution
+    private sealed class GameSettingsTab : IGameTabContribution
     {
+        private readonly GamesRegistry _registry;
         private readonly RenPySettingsService _settings;
         private readonly F95zoneClient _f95;
         private readonly F95zoneSessionStore _sessionStore;
+        private readonly RenPyWorker _worker;
+        private readonly GameUpdateInstaller _installer;
         private readonly IHostServices _host;
 
-        public SettingsTab(RenPySettingsService settings, F95zoneClient f95,
-            F95zoneSessionStore sessionStore, IHostServices host)
+        public GameSettingsTab(GamesRegistry registry, RenPySettingsService settings,
+            F95zoneClient f95, F95zoneSessionStore sessionStore,
+            RenPyWorker worker, GameUpdateInstaller installer, IHostServices host)
         {
-            _settings = settings; _f95 = f95; _sessionStore = sessionStore; _host = host;
+            _registry = registry; _settings = settings; _f95 = f95;
+            _sessionStore = sessionStore; _worker = worker; _installer = installer;
+            _host = host;
         }
 
         public string Id => "settings";
@@ -279,9 +287,13 @@ public sealed class RenPyAssistPlugin : IGameModPlugin, IUpdateNotifier
         public bool IsVisible(DetectedGame game) => true;
 
         public Control CreateView(DetectedGame game, IHostServices host)
-            => new SettingsView
+        {
+            var entry = _registry.EnsureFromContainer(game.InstallDir);
+            return new GameSettingsView
             {
-                DataContext = new SettingsViewModel(_settings, _f95, _sessionStore, _host),
+                DataContext = new GameSettingsViewModel(entry, _registry, _settings, _f95,
+                    _sessionStore, _worker, _installer, _host),
             };
+        }
     }
 }

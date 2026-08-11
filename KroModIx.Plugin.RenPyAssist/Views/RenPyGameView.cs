@@ -1,5 +1,6 @@
 using Avalonia;
 using Avalonia.Controls;
+using Avalonia.Controls.Templates;
 using Avalonia.Data;
 using Avalonia.Layout;
 using Avalonia.Markup.Xaml.MarkupExtensions;
@@ -7,25 +8,77 @@ using Avalonia.Media;
 
 namespace KroModIx.Plugin.RenPyAssist.Views;
 
-/// <summary>Per-Ren'Py-Spiel-Detail-Ansicht (v0.3+): Cover groß links,
-/// Titel + Version + Update-Badge + Sub-Path + Thread-URL-Editor rechts,
-/// Actions-Zeile unten (Play, Update, Ordner).</summary>
+/// <summary>Per-Ren'Py-Spiel Übersichts-View v0.5+ (Design-Änderung vom User):
+/// Titel groß zentriert · Cover darunter zentriert · Beschreibung
+/// (KI-übersetzt in System-Locale) · Genre-Chips. Actions + Thread-URL
+/// sind in den Einstellungen-Tab (⚙) gewandert — diese View ist reine
+/// Anzeige, wie eine Steam-Detail-Seite.</summary>
 public sealed class RenPyGameView : UserControl
 {
     public RenPyGameView()
     {
-        // --- Cover-Bereich (links) ---
+        // --- Titel groß zentriert ---
+        var title = new TextBlock
+        {
+            FontSize = 32,
+            FontWeight = FontWeight.SemiBold,
+            HorizontalAlignment = HorizontalAlignment.Center,
+            TextAlignment = TextAlignment.Center,
+            TextWrapping = TextWrapping.Wrap,
+            Margin = new Thickness(0, 0, 0, 12),
+        };
+        title.Bind(TextBlock.TextProperty, new Binding(nameof(RenPyGameViewModel.DisplayName)));
+
+        // Update-Badge kleiner unter dem Titel
+        var updateBadge = new Border
+        {
+            CornerRadius = new CornerRadius(14),
+            Padding = new Thickness(14, 4),
+            HorizontalAlignment = HorizontalAlignment.Center,
+            Margin = new Thickness(0, 0, 0, 12),
+            [!Border.BackgroundProperty] = new DynamicResourceExtension("KrosteGoldBrush"),
+        };
+        var updateBadgeText = new TextBlock
+        {
+            FontSize = 13, FontWeight = FontWeight.SemiBold,
+            Foreground = Brushes.Black,
+        };
+        updateBadgeText.Bind(TextBlock.TextProperty, new Binding(nameof(RenPyGameViewModel.UpdateBadgeText)));
+        updateBadge.Child = updateBadgeText;
+        updateBadge.Bind(Border.IsVisibleProperty, new Binding(nameof(RenPyGameViewModel.HasUpdate)));
+
+        var versionInfo = new TextBlock
+        {
+            FontSize = 12,
+            HorizontalAlignment = HorizontalAlignment.Center,
+            Margin = new Thickness(0, 0, 0, 4),
+        };
+        versionInfo.Classes.Add("muted");
+        versionInfo.Bind(TextBlock.TextProperty, new Binding(nameof(RenPyGameViewModel.VersionInfo)));
+
+        var subPath = new TextBlock
+        {
+            FontSize = 11,
+            HorizontalAlignment = HorizontalAlignment.Center,
+            Margin = new Thickness(0, 0, 0, 16),
+        };
+        subPath.Classes.Add("secondary");
+        subPath.Bind(TextBlock.TextProperty, new Binding(nameof(RenPyGameViewModel.SubPathText)));
+
+        // --- Cover zentriert ---
         var coverFrame = new Border
         {
-            Width = 220, Height = 300,
-            CornerRadius = new CornerRadius(8),
+            Width = 400, Height = 550,
+            HorizontalAlignment = HorizontalAlignment.Center,
+            CornerRadius = new CornerRadius(10),
             ClipToBounds = true,
+            Margin = new Thickness(0, 0, 0, 20),
             [!Border.BackgroundProperty] = new DynamicResourceExtension("KrosteSurfaceBrush"),
         };
         var coverPanel = new Panel();
         var coverFallback = new TextBlock
         {
-            Text = "🎮", FontSize = 72,
+            Text = "🎮", FontSize = 96,
             HorizontalAlignment = HorizontalAlignment.Center,
             VerticalAlignment = VerticalAlignment.Center,
         };
@@ -41,128 +94,108 @@ public sealed class RenPyGameView : UserControl
         coverPanel.Children.Add(coverImage);
         coverFrame.Child = coverPanel;
 
-        // --- Details rechts oben ---
-        var title = new TextBlock
+        // --- Beschreibung (KI-übersetzt oder Original) ---
+        var descHeader = new TextBlock
         {
-            FontSize = 24, FontWeight = FontWeight.SemiBold,
+            Text = "Beschreibung",
+            FontSize = 14,
+            FontWeight = FontWeight.SemiBold,
+            HorizontalAlignment = HorizontalAlignment.Center,
+            Margin = new Thickness(0, 8, 0, 4),
+        };
+        descHeader.Classes.Add("section-label");
+
+        var descText = new TextBlock
+        {
             TextWrapping = TextWrapping.Wrap,
-            VerticalAlignment = VerticalAlignment.Center,
+            TextAlignment = TextAlignment.Center,
+            MaxWidth = 800,
+            HorizontalAlignment = HorizontalAlignment.Center,
+            FontSize = 13,
+            Margin = new Thickness(0, 0, 0, 4),
         };
-        title.Bind(TextBlock.TextProperty, new Binding(nameof(RenPyGameViewModel.DisplayName)));
+        descText.Bind(TextBlock.TextProperty, new Binding(nameof(RenPyGameViewModel.DescriptionText)));
 
-        var updateBadge = new Border
+        var translationHint = new TextBlock
         {
-            CornerRadius = new CornerRadius(12),
-            Padding = new Thickness(10, 3),
-            VerticalAlignment = VerticalAlignment.Center,
-            [!Border.BackgroundProperty] = new DynamicResourceExtension("KrosteGoldBrush"),
+            FontSize = 10,
+            HorizontalAlignment = HorizontalAlignment.Center,
+            Margin = new Thickness(0, 0, 0, 20),
         };
-        var updateBadgeText = new TextBlock
+        translationHint.Classes.Add("secondary");
+        translationHint.Bind(TextBlock.TextProperty, new Binding(nameof(RenPyGameViewModel.TranslationHint)));
+
+        // --- Genre-Chips ---
+        var genreHeader = new TextBlock
         {
-            FontSize = 12, FontWeight = FontWeight.SemiBold,
-            Foreground = Brushes.Black,
+            Text = "Genre",
+            FontSize = 14,
+            FontWeight = FontWeight.SemiBold,
+            HorizontalAlignment = HorizontalAlignment.Center,
+            Margin = new Thickness(0, 12, 0, 6),
         };
-        updateBadgeText.Bind(TextBlock.TextProperty, new Binding(nameof(RenPyGameViewModel.UpdateBadgeText)));
-        updateBadge.Child = updateBadgeText;
-        updateBadge.Bind(Border.IsVisibleProperty, new Binding(nameof(RenPyGameViewModel.HasUpdate)));
+        genreHeader.Classes.Add("section-label");
 
-        var titleRow = new StackPanel
+        var genrePanel = new ItemsControl
         {
-            Orientation = Orientation.Horizontal, Spacing = 12,
-            Children = { title, updateBadge },
+            HorizontalAlignment = HorizontalAlignment.Center,
+            MaxWidth = 800,
         };
-
-        var subPath = new TextBlock { FontSize = 12, Margin = new Thickness(0, 8, 0, 0) };
-        subPath.Classes.Add("muted");
-        subPath.Bind(TextBlock.TextProperty, new Binding(nameof(RenPyGameViewModel.SubPathText))
-        { StringFormat = "Sub-Path: {0}" });
-
-        var versionsRow = new StackPanel
+        genrePanel.Bind(ItemsControl.ItemsSourceProperty, new Binding(nameof(RenPyGameViewModel.Genres)));
+        genrePanel.ItemsPanel = new FuncTemplate<Panel?>(() => new WrapPanel
         {
-            Orientation = Orientation.Horizontal, Spacing = 12,
-            Margin = new Thickness(0, 6, 0, 0),
-        };
-        var localTb = new TextBlock(); localTb.Classes.Add("muted");
-        localTb.Bind(TextBlock.TextProperty, new Binding(nameof(RenPyGameViewModel.VersionText)));
-        var sep = new TextBlock { Text = "·" }; sep.Classes.Add("muted");
-        var remoteTb = new TextBlock(); remoteTb.Classes.Add("muted");
-        remoteTb.Bind(TextBlock.TextProperty, new Binding(nameof(RenPyGameViewModel.RemoteText)));
-        versionsRow.Children.Add(localTb); versionsRow.Children.Add(sep); versionsRow.Children.Add(remoteTb);
-
-        var lastChecked = new TextBlock { FontSize = 11, Margin = new Thickness(0, 4, 0, 0) };
-        lastChecked.Classes.Add("secondary");
-        lastChecked.Bind(TextBlock.TextProperty, new Binding(nameof(RenPyGameViewModel.LastCheckedText)));
-
-        // --- Thread-URL-Editor ---
-        var threadLabel = new TextBlock { Text = "f95zone-Thread:", Margin = new Thickness(0, 20, 0, 4) };
-        threadLabel.Classes.Add("section-label");
-        var threadBox = new TextBox
+            HorizontalAlignment = HorizontalAlignment.Center,
+            ItemSpacing = 6,
+            LineSpacing = 6,
+        });
+        genrePanel.ItemTemplate = new FuncDataTemplate<string>((tag, _) =>
         {
-            PlaceholderText = "https://f95zone.to/threads/…",
-        };
-        threadBox.Bind(TextBox.TextProperty, new Binding(nameof(RenPyGameViewModel.ThreadUrlDraft))
-        { Mode = BindingMode.TwoWay });
-        var saveThreadBtn = new Button { Content = "💾 Speichern", Margin = new Thickness(0, 6, 0, 0) };
-        saveThreadBtn.Bind(Button.CommandProperty, new Binding(nameof(RenPyGameViewModel.SaveThreadUrlCommand)));
-
-        // --- Actions-Zeile ---
-        var playBtn = new Button { Content = "▶  Start" };
-        playBtn.Classes.Add("accent");
-        playBtn.Bind(Button.CommandProperty, new Binding(nameof(RenPyGameViewModel.PlayCommand)));
-
-        var checkBtn = new Button { Content = "🔄  Prüfen" };
-        checkBtn.Bind(Button.CommandProperty, new Binding(nameof(RenPyGameViewModel.CheckNowCommand)));
-
-        var updateBtn = new Button { Content = "⬆  Update installieren" };
-        updateBtn.Classes.Add("accent");
-        updateBtn.Bind(Button.CommandProperty, new Binding(nameof(RenPyGameViewModel.InstallUpdateCommand)));
-
-        var folderBtn = new Button { Content = "📂  Ordner" };
-        folderBtn.Classes.Add("ghost");
-        folderBtn.Bind(Button.CommandProperty, new Binding(nameof(RenPyGameViewModel.OpenFolderCommand)));
-
-        var actionsRow = new StackPanel
-        {
-            Orientation = Orientation.Horizontal, Spacing = 8,
-            Margin = new Thickness(0, 20, 0, 0),
-            Children = { playBtn, updateBtn, checkBtn, folderBtn },
-        };
-
-        var status = new TextBlock { Margin = new Thickness(0, 12, 0, 0) };
-        status.Classes.Add("muted");
-        status.Bind(TextBlock.TextProperty, new Binding(nameof(RenPyGameViewModel.StatusText)));
-
-        var pathHint = new TextBlock
-        {
-            FontSize = 10, Margin = new Thickness(0, 20, 0, 0),
-            TextWrapping = TextWrapping.Wrap,
-        };
-        pathHint.Classes.Add("secondary");
-        pathHint.Bind(TextBlock.TextProperty, new Binding(nameof(RenPyGameViewModel.ContainerPath))
-        { StringFormat = "Container: {0}" });
-
-        // --- Layout ---
-        var details = new StackPanel
-        {
-            Margin = new Thickness(20, 0, 0, 0),
-            Children = { titleRow, subPath, versionsRow, lastChecked,
-                threadLabel, threadBox, saveThreadBtn,
-                actionsRow, status, pathHint },
-        };
-
-        var grid = new Grid { ColumnDefinitions = new ColumnDefinitions("Auto,*") };
-        Grid.SetColumn(coverFrame, 0);
-        Grid.SetColumn(details, 1);
-        grid.Children.Add(coverFrame);
-        grid.Children.Add(details);
-
-        Content = new ScrollViewer
-        {
-            Content = new Border
+            if (tag is null) return null;
+            var chip = new Border
             {
-                Padding = new Thickness(24),
-                Child = grid,
+                CornerRadius = new CornerRadius(12),
+                Padding = new Thickness(10, 3),
+                [!Border.BackgroundProperty] = new DynamicResourceExtension("KrosteSurfaceBrush"),
+            };
+            var chipText = new TextBlock
+            {
+                Text = tag,
+                FontSize = 11,
+            };
+            chip.Child = chipText;
+            return chip;
+        }, true);
+
+        // --- No-Thread-Hint (nur wenn kein Thread-URL gesetzt) ---
+        var noThreadHint = new TextBlock
+        {
+            TextWrapping = TextWrapping.Wrap,
+            TextAlignment = TextAlignment.Center,
+            MaxWidth = 700,
+            HorizontalAlignment = HorizontalAlignment.Center,
+            Margin = new Thickness(0, 16, 0, 0),
+            FontStyle = FontStyle.Italic,
+        };
+        noThreadHint.Classes.Add("muted");
+        noThreadHint.Bind(TextBlock.TextProperty, new Binding(nameof(RenPyGameViewModel.NoThreadHint)));
+        noThreadHint.Bind(TextBlock.IsVisibleProperty, new Binding(nameof(RenPyGameViewModel.HasThread))
+        { Converter = new Avalonia.Data.Converters.FuncValueConverter<bool, bool>(v => !v) });
+
+        // --- Layout: zentrierter StackPanel im ScrollViewer ---
+        var stack = new StackPanel
+        {
+            HorizontalAlignment = HorizontalAlignment.Center,
+            Margin = new Thickness(24, 32, 24, 24),
+            Children =
+            {
+                title, updateBadge, versionInfo, subPath,
+                coverFrame,
+                descHeader, descText, translationHint,
+                genreHeader, genrePanel,
+                noThreadHint,
             },
         };
+
+        Content = new ScrollViewer { Content = stack };
     }
 }

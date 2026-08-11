@@ -30,6 +30,8 @@ public sealed partial class ArchivesViewModel : ObservableObject
     [ObservableProperty] private string? _previewText;
     [ObservableProperty] private Bitmap? _previewImage;
     [ObservableProperty] private string? _previewInfo;
+    private bool _canPlayExternal;
+    public bool CanPlayExternal => _canPlayExternal;
 
     public ObservableCollection<ArchiveRow> Archives { get; } = new();
     public ObservableCollection<EntryRow> Entries { get; } = new();
@@ -109,6 +111,7 @@ public sealed partial class ArchivesViewModel : ObservableObject
     private async Task LoadPreviewAsync(EntryRow? row)
     {
         PreviewText = null; PreviewImage = null; PreviewInfo = null;
+        _canPlayExternal = false;
         if (row is null || SelectedArchive?.Archive is null) return;
         var archivePath = SelectedArchive.FullPath;
         var entry = row.Entry;
@@ -144,9 +147,12 @@ public sealed partial class ArchivesViewModel : ObservableObject
                         Path.GetExtension(entry.Path));
                     if (frame is not null) LoadBitmap(frame);
                     else PreviewInfo += " · Video-Frame-Grab fehlgeschlagen (ffmpeg?)";
+                    PreviewInfo += " · Klick aufs Bild oder ▶ Extern öffnen für Playback";
+                    _canPlayExternal = true;
                     break;
                 case PreviewKind.Audio:
-                    PreviewInfo += " · Audio — Extern via ▶ Öffnen";
+                    PreviewInfo += " · Audio — ▶ Extern öffnen für Playback";
+                    _canPlayExternal = true;
                     break;
                 case PreviewKind.Binary:
                     PreviewInfo += " · binär (kein Preview)";
