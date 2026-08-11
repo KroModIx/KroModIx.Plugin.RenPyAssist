@@ -2,12 +2,12 @@
   "schema": 1,
   "id": "kroste.renpyassist",
   "displayName": "Ren'Py Assist",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "author": "Kroste",
-  "description": "Verwaltet Ren'Py-Spiele (game/-Marker) aus einem Root-Ordner, findet f95zone-Threads, überwacht Version-Updates. Update-Flow via Sub-Path-Rotation — game/saves/ bleibt erhalten. Basiert auf RenPack + RenPack.Plugins.F95zone.",
+  "description": "Verwaltet Ren'Py-Spiele (game/-Marker) aus einem Root-Ordner, findet f95zone-Threads, überwacht Version-Updates. Update-Flow via Sub-Path-Rotation — game/saves/ bleibt erhalten. Setup: Host-Wizard '🎮 Ordner mit Spielen scannen' wählt den Root, das Plugin bekommt ihn beim Init automatisch. Basiert auf RenPack + RenPack.Plugins.F95zone.",
   "assembly": "KroModIx.Plugin.RenPyAssist.dll",
   "entryType": "KroModIx.Plugin.RenPyAssist.RenPyAssistPlugin",
-  "minHostVersion": "1.7.5",
+  "minHostVersion": "1.8.0",
   "targets": [
     {
       "gameId": "renpy-anchor",
@@ -17,10 +17,6 @@
       "platforms": "Both"
     }
   ],
-  "virtualGame": {
-    "displayName": "Ren'Py Games",
-    "steamAppId": 9000001
-  },
   "updateSource": {
     "kind": "github",
     "repo": "KroModIx/KroModIx.Plugin.RenPyAssist"

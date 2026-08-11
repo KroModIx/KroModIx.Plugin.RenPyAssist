@@ -24,16 +24,18 @@ Ren'Py-Adult-Visual-Novels aus f95zone. Der User hat einen
 
 ## Aktivierung im Host
 
-Ren'Py Assist nutzt das **`virtualGame`**-Feld im Plugin-Manifest
-(Contracts v1.7.5): der Host legt beim Discovery automatisch eine
-Manual-Sidebar-Kachel „Ren'Py Games" mit Anchor-SteamAppId `9000001`
-an, sobald das Plugin installiert ist. Kein „➕ Spiel hinzufügen"-Klick
-nötig, kein Steam-Bezug nötig.
+Ab v0.2.0: **Host-Wizard „🎮 Ordner mit Spielen scannen"** (Host v1.8.0+).
+Klick auf das 🎮-Icon in der Sidebar → Ren'Py-Root wählen → Host scannt
+rekursiv nach `game/`-Marker → „N Ren'Py-Spiele gefunden. Importieren?"
+→ Sammel-Kachel entsteht in der Sidebar, RenPyAssist übernimmt.
 
-**Braucht Host v1.7.5 oder neuer** — ältere Hosts ignorieren
-`virtualGame` und die Kachel bleibt aus.
+Kein Steam-Bezug nötig. Der Root-Ordner kommt vom Wizard direkt ins
+Plugin — das Plugin-Settings-Root-Feld ist nur noch Backward-Compat-
+Fallback für User die pre-v0.2 den Root manuell gesetzt hatten.
 
-## Features (v0.1.1)
+**Braucht Host v1.8.0 oder neuer.**
+
+## Features (v0.2.0)
 
 ### Spiele-Tab
 - Card-Liste aller registrierter Ren'Py-Spiele mit Cover, aktuellem
@@ -100,14 +102,13 @@ Alternativ: 1-Klick-Install über die Install-Karte in der KroModIx-Sidebar
 
 1. Plugin über die Sidebar-Install-Karte installieren
    (oder Release-ZIP manuell entpacken — siehe unten).
-2. KroModIx neu starten — die Kachel **„Ren'Py Games"** erscheint
-   automatisch in der Sidebar (dank `virtualGame`).
-3. Kachel anklicken → **Einstellungen-Tab** öffnen → **Root-Ordner**
-   setzen (der Ordner mit deinen Ren'Py-Container-Unterordnern) →
-   Speichern.
-4. **Spiele-Tab** → 🔄 Rescan → deine Ren'Py-Spiele erscheinen als
-   Cards.
-5. Optional: **f95zone-Login** eintragen (für Cover-Downloads).
+2. In der Sidebar auf **🎮** (neben „➕ Spiel hinzufügen") klicken.
+3. Root-Ordner deiner Ren'Py-Sammlung wählen → **🔍 Scannen** →
+   Host meldet „Ren'Py: N Spiele gefunden" → **Sammlung importieren**.
+4. Neue Sidebar-Kachel „Ren'Py Games" anklicken → **Spiele-Tab** zeigt
+   deine Spiele als Cards.
+5. Optional: **Einstellungen-Tab** → **f95zone-Login** eintragen
+   (für Cover-Downloads).
 6. Pro Spiel: f95zone-Thread-URL in die Inline-TextBox einfügen,
    💾 klicken → Version-Poll läuft sofort.
 

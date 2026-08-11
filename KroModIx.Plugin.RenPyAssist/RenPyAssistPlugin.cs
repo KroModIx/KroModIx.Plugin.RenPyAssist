@@ -20,7 +20,7 @@ public sealed class RenPyAssistPlugin : IGameModPlugin, IUpdateNotifier
     public PluginMetadata Metadata { get; } = new(
         Id: "kroste.renpyassist",
         DisplayName: "Ren'Py Assist",
-        Version: "0.1.1",
+        Version: "0.2.0",
         Author: "Kroste",
         Description: "Ordner-basierter Mod-/Update-Manager für Ren'Py-Spiele. " +
             "F95zone-Anbindung mit CSRF-Login und Session-Cookie-Ablage " +
@@ -29,12 +29,10 @@ public sealed class RenPyAssistPlugin : IGameModPlugin, IUpdateNotifier
             "bei neuer f95zone-Version, installiert ZIP-Updates in einen " +
             "neuen Sub-Ordner und kopiert Save-Games automatisch.");
 
-    // Anchor via plugin.json.virtualGame (Contracts v1.7.5): der Host legt
-    // beim Discovery ein Manual-Game mit SteamAppId 9000001 an und rendert
-    // die Sidebar-Kachel. Wir wählen bewusst eine ID im 9-Mio-Bereich
-    // (nicht Proton-Experimental 1493710 wie in v0.1.0), damit User mit
-    // Proton nicht plötzlich eine RenPyAssist-Kachel zusätzlich zur echten
-    // Proton-Kachel bekommen.
+    // Anchor via Host-Wizard „🎮 Ordner mit Spielen scannen" (Host v1.8.0+):
+    // der User wählt seinen Ren'Py-Root, der Host legt ein Manual-Game mit
+    // SteamAppId 9000001 + InstallDir=<root> an. AppId 9000001 ist die
+    // Kroste-Convention für Ren'Py-Sammel-Anchor — User sieht die Zahl nie.
     public IReadOnlyList<GameTarget> Targets { get; } = new[]
     {
         new GameTarget("renpy-anchor", "Ren'Py Games (Ordner-Sammlung)",
@@ -74,6 +72,29 @@ public sealed class RenPyAssistPlugin : IGameModPlugin, IUpdateNotifier
         {
             _f95.ImportCookies(cookieBlob);
             host.Logger.Info("f95zone-Cookies restauriert (authenticated={Auth})", _f95.IsAuthenticated);
+        }
+
+        // Root-Ermittlung (v0.2): DetectedGame.InstallDir vom Host-Wizard
+        // hat Vorrang; nur wenn der leer/Placeholder ist, fällt es auf
+        // Plugin-Settings.GamesRoot zurück (Backward-Compat für v0.1.x-
+        // Setups die den Root manuell im Settings-Tab hatten).
+        var wizardRoot = activatedGames
+            .Select(g => g.InstallDir)
+            .FirstOrDefault(p => !string.IsNullOrWhiteSpace(p)
+                              && p != "/" && p != @"C:\"
+                              && Directory.Exists(p));
+        if (!string.IsNullOrWhiteSpace(wizardRoot)
+            && !string.Equals(wizardRoot, _settings.Current.GamesRoot, StringComparison.Ordinal))
+        {
+            host.Logger.Info("Root vom Host-Wizard übernommen: {Root}", wizardRoot);
+            var cur = _settings.Current;
+            _settings.Save(new RenPySettings
+            {
+                GamesRoot = wizardRoot!,
+                DownloadsWatchDir = cur.DownloadsWatchDir,
+                CheckIntervalMinutes = cur.CheckIntervalMinutes,
+                F95Username = cur.F95Username,
+            });
         }
 
         // Initial-Rescan wenn Root gesetzt und existiert. Nicht blockierend —
