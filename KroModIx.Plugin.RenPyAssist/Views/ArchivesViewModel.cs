@@ -40,11 +40,17 @@ public sealed partial class ArchivesViewModel : ObservableObject
     [ObservableProperty] private bool _canInlinePlay;
     /// <summary>Läuft die MJPEG-Frame-Schleife gerade — steuert Play/Pause-
     /// Beschriftung + verhindert Doppel-Start.</summary>
-    [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(InlinePlayButtonLabel))]
-    private bool _isPlayingInline;
+    [ObservableProperty] private bool _isPlayingInline;
 
-    public string InlinePlayButtonLabel => IsPlayingInline ? "⏸  Stopp" : "▶  Inline abspielen";
+    /// <summary>Aktuelles Entry ist Video oder Audio (nicht Text/Bild/Binär).
+    /// Steuert Sichtbarkeit des Play-Button-Panels am Preview-Bottom.</summary>
+    [ObservableProperty] private bool _isMedia;
+    /// <summary>Video (mit Bild-Frame) — Placeholder-Icon bleibt aus.</summary>
+    [ObservableProperty] private bool _isVideo;
+    /// <summary>Reiner Audio-Track. Kein Inline-Play, nur Extern-Button.</summary>
+    [ObservableProperty] private bool _isAudioOnly;
+    /// <summary>Video ohne ffmpeg im PATH — Install-Hinweis statt Player.</summary>
+    [ObservableProperty] private bool _showFfmpegMissingHint;
     private CancellationTokenSource? _inlinePlayCts;
     // Temp-File des aktuell selektierten Video-Entries (aus RPA extrahiert).
     // Wird bei jeder neuen Preview aufgeräumt.
@@ -132,6 +138,8 @@ public sealed partial class ArchivesViewModel : ObservableObject
         PreviewText = null; PreviewImage = null; PreviewInfo = null;
         _canPlayExternal = false;
         CanInlinePlay = false;
+        IsMedia = false; IsVideo = false; IsAudioOnly = false;
+        ShowFfmpegMissingHint = false;
         if (row is null || SelectedArchive?.Archive is null) return;
         var archivePath = SelectedArchive.FullPath;
         var entry = row.Entry;
@@ -163,10 +171,10 @@ public sealed partial class ArchivesViewModel : ObservableObject
                     LoadBitmap(bytes);
                     break;
                 case PreviewKind.Video:
+                    IsMedia = true; IsVideo = true;
                     var frame = await _preview.GrabFirstFrameAsync(bytes,
                         Path.GetExtension(entry.Path));
                     if (frame is not null) LoadBitmap(frame);
-                    else PreviewInfo += " · Video-Frame-Grab fehlgeschlagen (ffmpeg?)";
                     // v0.9: Temp-File anlegen für Inline-Playback (StreamFrames
                     // braucht Datei-Pfad, kein Byte-Stream). Wird bei nächster
                     // Selection/Cleanup gelöscht.
@@ -178,22 +186,20 @@ public sealed partial class ArchivesViewModel : ObservableObject
                         {
                             await File.WriteAllBytesAsync(_currentVideoTempPath, bytes);
                             CanInlinePlay = true;
-                            PreviewInfo += " · ▶ Inline abspielen oder ⤴ Extern öffnen";
                         }
                         catch
                         {
                             CleanupVideoTempFile();
-                            PreviewInfo += " · Inline-Playback nicht möglich (Temp-File)";
                         }
                     }
                     else
                     {
-                        PreviewInfo += " · ffmpeg fehlt — nur externer Player";
+                        ShowFfmpegMissingHint = true;
                     }
                     _canPlayExternal = true;
                     break;
                 case PreviewKind.Audio:
-                    PreviewInfo += " · Audio — ▶ Extern öffnen für Playback";
+                    IsMedia = true; IsAudioOnly = true;
                     _canPlayExternal = true;
                     break;
                 case PreviewKind.Binary:

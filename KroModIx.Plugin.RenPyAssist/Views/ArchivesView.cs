@@ -2,6 +2,7 @@ using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.Templates;
 using Avalonia.Data;
+using Avalonia.Data.Converters;
 using Avalonia.Layout;
 using Avalonia.Markup.Xaml.MarkupExtensions;
 using Avalonia.Media;
@@ -9,13 +10,16 @@ using Avalonia.Media;
 namespace KroModIx.Plugin.RenPyAssist.Views;
 
 /// <summary>Archives-Tab (v0.4+): links Archiv-Liste, mittig Entry-Baum,
-/// rechts Preview-Panel (Bild/Text/Video-Frame). Actions: Extract, Extract-All,
-/// Extern öffnen.</summary>
+/// rechts Preview-Panel (Bild/Text/Video-Frame). v0.9.1: Preview-Panel-
+/// Layout an RenPack angeglichen — Play-Buttons als Dock=Bottom am
+/// Preview-Panel (immer sichtbar wenn IsMedia), Placeholder-Icons für
+/// Video-ohne-Bild + Audio-only, ffmpeg-Missing-Hint. Actions: Extract,
+/// Extract-All.</summary>
 public sealed class ArchivesView : UserControl
 {
     public ArchivesView()
     {
-        // --- Toolbar oben ---
+        // --- Toolbar oben (Archiv-Aktionen, kein Preview-Playback mehr) ---
         var scanBtn = new Button { Content = "🔄  Neu scannen" };
         scanBtn.Bind(Button.CommandProperty, new Binding(nameof(ArchivesViewModel.ScanCommand)));
 
@@ -26,23 +30,11 @@ public sealed class ArchivesView : UserControl
         var extractAllBtn = new Button { Content = "⬇⬇  Alles entpacken" };
         extractAllBtn.Bind(Button.CommandProperty, new Binding(nameof(ArchivesViewModel.ExtractAllCommand)));
 
-        // v0.9: Inline-Video-Playback via ffmpeg-MJPEG-Stream.
-        // Sichtbar wenn Video + ffmpeg da. Label toggelt Play/Stopp.
-        var inlinePlayBtn = new Button();
-        inlinePlayBtn.Classes.Add("accent");
-        inlinePlayBtn.Bind(Button.ContentProperty, new Binding(nameof(ArchivesViewModel.InlinePlayButtonLabel)));
-        inlinePlayBtn.Bind(Button.CommandProperty, new Binding(nameof(ArchivesViewModel.ToggleInlinePlaybackCommand)));
-        inlinePlayBtn.Bind(Button.IsVisibleProperty, new Binding(nameof(ArchivesViewModel.CanInlinePlay)));
-
-        var externBtn = new Button { Content = "⤴  Extern öffnen" };
-        externBtn.Classes.Add("ghost");
-        externBtn.Bind(Button.CommandProperty, new Binding(nameof(ArchivesViewModel.OpenExternalCommand)));
-
         var toolbar = new StackPanel
         {
             Orientation = Orientation.Horizontal, Spacing = 8,
             Margin = new Thickness(0, 0, 0, 10),
-            Children = { scanBtn, extractBtn, extractAllBtn, inlinePlayBtn, externBtn },
+            Children = { scanBtn, extractBtn, extractAllBtn },
         };
 
         var status = new TextBlock { Margin = new Thickness(0, 0, 0, 8) };
@@ -102,65 +94,7 @@ public sealed class ArchivesView : UserControl
             };
         }, true);
 
-        // --- Right: Preview ---
-        var previewImage = new Image
-        {
-            Stretch = Stretch.Uniform,
-            HorizontalAlignment = HorizontalAlignment.Center,
-            VerticalAlignment = VerticalAlignment.Top,
-            MaxHeight = 600,
-            Cursor = new Avalonia.Input.Cursor(Avalonia.Input.StandardCursorType.Hand),
-        };
-        previewImage.Bind(Image.SourceProperty, new Binding(nameof(ArchivesViewModel.PreviewImage)));
-        previewImage.Bind(Image.IsVisibleProperty, new Binding(nameof(ArchivesViewModel.PreviewImage))
-        { Converter = Avalonia.Data.Converters.ObjectConverters.IsNotNull });
-        // Video-Thumbnail-Klick öffnet extern (System-Default-Player).
-        previewImage.PointerPressed += (_, _) =>
-        {
-            if (DataContext is ArchivesViewModel vm && vm.CanPlayExternal)
-                vm.OpenExternalCommand.Execute(null);
-        };
-        ToolTip.SetTip(previewImage, "Klick öffnet Video im System-Default-Player");
-
-        var previewText = new TextBox
-        {
-            IsReadOnly = true,
-            AcceptsReturn = true,
-            TextWrapping = TextWrapping.NoWrap,
-            FontFamily = new FontFamily("monospace"),
-            FontSize = 11,
-            MaxHeight = 600,
-        };
-        previewText.Bind(TextBox.TextProperty, new Binding(nameof(ArchivesViewModel.PreviewText)));
-        previewText.Bind(TextBox.IsVisibleProperty, new Binding(nameof(ArchivesViewModel.PreviewText))
-        { Converter = Avalonia.Data.Converters.ObjectConverters.IsNotNull });
-
-        var previewInfo = new TextBlock
-        {
-            Margin = new Thickness(0, 0, 0, 8),
-            TextWrapping = TextWrapping.Wrap,
-        };
-        previewInfo.Classes.Add("muted");
-        previewInfo.Bind(TextBlock.TextProperty, new Binding(nameof(ArchivesViewModel.PreviewInfo)));
-
-        var previewCol = new StackPanel
-        {
-            Children = { previewInfo, previewImage, previewText },
-        };
-
-        // --- Layout: 3-column ---
-        var grid = new Grid
-        {
-            ColumnDefinitions = new ColumnDefinitions("Auto,*,2*"),
-        };
-        Grid.SetColumn(archives, 0);
-        Grid.SetColumn(entries, 1);
-        var previewScroll = new ScrollViewer { Content = previewCol, Margin = new Thickness(12, 0, 0, 0) };
-        Grid.SetColumn(previewScroll, 2);
-        grid.Children.Add(archives);
-        grid.Children.Add(entries);
-        grid.Children.Add(previewScroll);
-
+        // --- Right: Preview panel (RenPack-Layout) ---
         Content = new DockPanel
         {
             Margin = new Thickness(16, 12),
@@ -168,9 +102,185 @@ public sealed class ArchivesView : UserControl
             {
                 WithDock(toolbar, Dock.Top),
                 WithDock(status, Dock.Top),
-                grid,
+                BuildMainGrid(archives, entries),
             },
         };
+    }
+
+    private static Grid BuildMainGrid(Control archives, Control entries)
+    {
+        var grid = new Grid
+        {
+            ColumnDefinitions = new ColumnDefinitions("Auto,*,2*"),
+        };
+        Grid.SetColumn(archives, 0);
+        Grid.SetColumn(entries, 1);
+        var previewPanel = BuildPreviewPanel();
+        Grid.SetColumn(previewPanel, 2);
+        grid.Children.Add(archives);
+        grid.Children.Add(entries);
+        grid.Children.Add(previewPanel);
+        return grid;
+    }
+
+    private static Control BuildPreviewPanel()
+    {
+        // --- Header: Info-Zeile ---
+        var previewInfo = new TextBlock
+        {
+            Margin = new Thickness(12, 8, 12, 8),
+            TextWrapping = TextWrapping.Wrap,
+        };
+        previewInfo.Classes.Add("muted");
+        previewInfo.Bind(TextBlock.TextProperty, new Binding(nameof(ArchivesViewModel.PreviewInfo)));
+
+        // --- Bottom: Play-Button-Panel (nur bei IsMedia sichtbar) ---
+        // "▶ Inline abspielen" — sichtbar wenn CanInlinePlay && !IsPlayingInline
+        var inlinePlayBtn = new Button { Content = "▶  Inline abspielen" };
+        inlinePlayBtn.Bind(Button.CommandProperty, new Binding(nameof(ArchivesViewModel.ToggleInlinePlaybackCommand)));
+        ToolTip.SetTip(inlinePlayBtn, "MJPEG-Frame-Stream via ffmpeg (kein Audio, 12 fps)");
+        // Sichtbar wenn Video + ffmpeg da UND grade nicht abspielend — sonst
+        // zeigen wir den Pause-Btn als Geschwister. RenPack-Muster: separate
+        // Buttons statt Toggle-Text, sauber-exklusiv per MultiBinding.
+        var playVisibility = new MultiBinding
+        {
+            Converter = BoolConverters.And,
+            Bindings =
+            {
+                new Binding(nameof(ArchivesViewModel.CanInlinePlay)),
+                new Binding(nameof(ArchivesViewModel.IsPlayingInline)) { Converter = BoolConverters.Not },
+            },
+        };
+        inlinePlayBtn.Bind(Button.IsVisibleProperty, playVisibility);
+
+        // "⏸ Pause" — sichtbar wenn IsPlayingInline
+        var pauseBtn = new Button { Content = "⏸  Pause" };
+        pauseBtn.Bind(Button.CommandProperty, new Binding(nameof(ArchivesViewModel.ToggleInlinePlaybackCommand)));
+        pauseBtn.Bind(Button.IsVisibleProperty, new Binding(nameof(ArchivesViewModel.IsPlayingInline)));
+        ToolTip.SetTip(pauseBtn, "Inline-Wiedergabe stoppen");
+
+        // "⤴ Extern öffnen" (accent, immer wenn IsMedia)
+        var externBtn = new Button { Content = "⤴  Extern öffnen" };
+        externBtn.Classes.Add("accent");
+        externBtn.Bind(Button.CommandProperty, new Binding(nameof(ArchivesViewModel.OpenExternalCommand)));
+        ToolTip.SetTip(externBtn, "Im System-Default-Player öffnen (VLC/mpv/…)");
+
+        var buttonPanel = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            HorizontalAlignment = HorizontalAlignment.Center,
+            Margin = new Thickness(0, 10, 0, 12),
+            Spacing = 8,
+            Children = { inlinePlayBtn, pauseBtn, externBtn },
+        };
+        buttonPanel.Bind(StackPanel.IsVisibleProperty, new Binding(nameof(ArchivesViewModel.IsMedia)));
+        DockPanel.SetDock(buttonPanel, Dock.Bottom);
+
+        // --- Center: Overlay-Grid (Text/Bild/Icons in einer Zelle) ---
+        var previewText = new TextBox
+        {
+            IsReadOnly = true,
+            AcceptsReturn = true,
+            TextWrapping = TextWrapping.NoWrap,
+            FontFamily = new FontFamily("monospace"),
+            FontSize = 11,
+            Margin = new Thickness(12, 0),
+        };
+        previewText.Bind(TextBox.TextProperty, new Binding(nameof(ArchivesViewModel.PreviewText)));
+        previewText.Bind(TextBox.IsVisibleProperty, new Binding(nameof(ArchivesViewModel.PreviewText))
+        { Converter = ObjectConverters.IsNotNull });
+
+        var previewImage = new Image
+        {
+            Stretch = Stretch.Uniform,
+            StretchDirection = StretchDirection.DownOnly,
+            HorizontalAlignment = HorizontalAlignment.Center,
+            VerticalAlignment = VerticalAlignment.Center,
+            Margin = new Thickness(12),
+        };
+        previewImage.Bind(Image.SourceProperty, new Binding(nameof(ArchivesViewModel.PreviewImage)));
+        previewImage.Bind(Image.IsVisibleProperty, new Binding(nameof(ArchivesViewModel.PreviewImage))
+        { Converter = ObjectConverters.IsNotNull });
+
+        // Video ohne Standbild → 🎬-Icon (visible wenn IsVideo && kein Bild
+        // extrahiert wurde). Signalisiert: hier steckt ein Video, klick Play.
+        var videoIcon = new TextBlock
+        {
+            Text = "🎬",
+            FontSize = 96,
+            HorizontalAlignment = HorizontalAlignment.Center,
+            VerticalAlignment = VerticalAlignment.Center,
+        };
+        videoIcon.Bind(TextBlock.ForegroundProperty, new DynamicResourceExtension("KrosteGoldBrush"));
+        var videoIconVisibility = new MultiBinding
+        {
+            Converter = BoolConverters.And,
+            Bindings =
+            {
+                new Binding(nameof(ArchivesViewModel.IsVideo)),
+                new Binding(nameof(ArchivesViewModel.PreviewImage)) { Converter = ObjectConverters.IsNull },
+            },
+        };
+        videoIcon.Bind(TextBlock.IsVisibleProperty, videoIconVisibility);
+
+        // Audio-only → 🎵-Icon
+        var audioIcon = new TextBlock
+        {
+            Text = "🎵",
+            FontSize = 96,
+            HorizontalAlignment = HorizontalAlignment.Center,
+            VerticalAlignment = VerticalAlignment.Center,
+        };
+        audioIcon.Bind(TextBlock.ForegroundProperty, new DynamicResourceExtension("KrosteGoldBrush"));
+        audioIcon.Bind(TextBlock.IsVisibleProperty, new Binding(nameof(ArchivesViewModel.IsAudioOnly)));
+
+        // ffmpeg fehlt → Install-Hinweis (nur bei Video)
+        var ffmpegHint = new TextBlock
+        {
+            Text = "ffmpeg fehlt — für Inline-Playback bitte installieren:\n" +
+                   "Fedora/Bazzite: sudo dnf install ffmpeg-free\n" +
+                   "Debian/Ubuntu: sudo apt install ffmpeg\n" +
+                   "Windows: winget install ffmpeg\n\n" +
+                   "Der externe Player funktioniert trotzdem.",
+            TextWrapping = TextWrapping.Wrap,
+            HorizontalAlignment = HorizontalAlignment.Center,
+            VerticalAlignment = VerticalAlignment.Center,
+            MaxWidth = 420,
+            Padding = new Thickness(24),
+            TextAlignment = TextAlignment.Center,
+        };
+        ffmpegHint.Classes.Add("secondary");
+        ffmpegHint.Bind(TextBlock.IsVisibleProperty, new Binding(nameof(ArchivesViewModel.ShowFfmpegMissingHint)));
+
+        // Grid ohne RowDefs/ColDefs = alle Kinder in einer Zelle (Overlay).
+        // Z-Order = XAML-/Add-Reihenfolge (unten = erste, oben = letzte).
+        var overlay = new Grid();
+        overlay.Children.Add(videoIcon);
+        overlay.Children.Add(audioIcon);
+        overlay.Children.Add(ffmpegHint);
+        overlay.Children.Add(previewText);
+        overlay.Children.Add(previewImage);
+
+        // Preview-Panel: DockPanel mit Header(Top) + Buttons(Bottom) + Overlay(Fill)
+        var panel = new DockPanel
+        {
+            Margin = new Thickness(12, 0, 0, 0),
+            LastChildFill = true,
+        };
+        DockPanel.SetDock(previewInfo, Dock.Top);
+        panel.Children.Add(previewInfo);
+        panel.Children.Add(buttonPanel);
+        panel.Children.Add(overlay);
+
+        // Card-Look mit Border
+        var card = new Border
+        {
+            Child = panel,
+            ClipToBounds = true,
+            Margin = new Thickness(12, 0, 0, 0),
+        };
+        card.Classes.Add("card-flat");
+        return card;
     }
 
     private static Control WithDock(Control c, Dock d) { DockPanel.SetDock(c, d); return c; }
