@@ -24,7 +24,7 @@ public sealed class RenPyAssistPlugin : IGameModPlugin, IUpdateNotifier
     public PluginMetadata Metadata { get; } = new(
         Id: "kroste.renpyassist",
         DisplayName: "Ren'Py Assist",
-        Version: "0.5.2",
+        Version: "0.5.3",
         Author: "Kroste",
         Description: "Verwaltet Ren'Py-Spiele als eigenständige Sidebar-Kacheln " +
             "(Multi-Tile). Setup via Host-Wizard '🎮 Ordner mit Spielen scannen' " +
@@ -91,7 +91,13 @@ public sealed class RenPyAssistPlugin : IGameModPlugin, IUpdateNotifier
         // v0.3: pro DetectedGame (= eine Sidebar-Kachel) einen Registry-
         // Eintrag anlegen falls noch nicht da. RenPyGameDetector extrahiert
         // beim Anlegen ActiveSubPath + LocalVersion aus dem Filesystem.
-        int registered = 0;
+        //
+        // v0.5.3: nach Registry-Ensure pro Kachel auch das Cover an den
+        // Host propagieren — sonst haben die Sidebar-Kacheln nach jedem
+        // Neustart kein Bild bis der User die Detail-View öffnet. Priorität:
+        // User-Crop (`.renpyassist/sidebar-cover.png`) > Container-Local-
+        // Cover (`.renpyassist/cover.img`).
+        int registered = 0, coversPropagated = 0;
         foreach (var game in activatedGames)
         {
             if (string.IsNullOrWhiteSpace(game.InstallDir)
@@ -103,6 +109,20 @@ public sealed class RenPyAssistPlugin : IGameModPlugin, IUpdateNotifier
             }
             _registry.EnsureFromContainer(game.InstallDir);
             registered++;
+            // Cover-Path an Host propagieren (falls schon lokal gespeichert).
+            var sidebar = GameLocalStore.SidebarCoverPath(game.InstallDir);
+            var full = GameLocalStore.CoverPath(game.InstallDir);
+            var coverToUse = File.Exists(sidebar) ? sidebar
+                           : File.Exists(full) ? full : null;
+            if (coverToUse is not null)
+            {
+                try
+                {
+                    if (host.TrySetManualGameCover(game.InstallDir, coverToUse))
+                        coversPropagated++;
+                }
+                catch (Exception ex) { host.Logger.Debug(ex, "Cover-Init-Propagate: {Dir}", game.InstallDir); }
+            }
         }
 
         var dlDir = _settings.Current.DownloadsWatchDir;
@@ -118,8 +138,8 @@ public sealed class RenPyAssistPlugin : IGameModPlugin, IUpdateNotifier
         }
 
         _worker.Start();
-        host.Logger.Info("Ren'Py Assist v0.3 initialisiert: {N} Spiel-Kachel(n) registriert, watchDir='{Dl}'",
-            registered, dlDir);
+        host.Logger.Info("Ren'Py Assist v0.5.3 initialisiert: {N} Spiel-Kachel(n) registriert, " +
+            "{C} Cover propagiert, watchDir='{Dl}'", registered, coversPropagated, dlDir);
         return Task.CompletedTask;
     }
 
