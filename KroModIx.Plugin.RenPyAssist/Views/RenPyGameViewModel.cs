@@ -82,6 +82,13 @@ public sealed partial class RenPyGameViewModel : ObservableObject
     {
         if (string.IsNullOrEmpty(_game.CoverUrl)) { Cover = null; return; }
         var path = await _covers.EnsureAsync(_game.CoverUrl!);
+        if (path is not null && File.Exists(path))
+        {
+            // Host-Sidebar-Kachel-Cover propagieren (Contracts v1.9.3+).
+            // Bei älteren Hosts default-Impl = no-op, kein Fehler.
+            try { _host.TrySetManualGameCover(_containerPath, path); }
+            catch (Exception ex) { _host.Logger.Debug(ex, "TrySetManualGameCover fehlgeschlagen"); }
+        }
         Dispatcher.UIThread.Post(() =>
         {
             try
