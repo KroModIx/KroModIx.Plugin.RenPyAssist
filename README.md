@@ -9,79 +9,120 @@ mit direkter [f95zone.to](https://f95zone.to/)-Anbindung. Plugin für den
 
 ## Ziel
 
-Nicht Steam-Spiele mit ihrem `game/`-Marker-Ordner:
-Ren'Py-Adult-Visual-Novels aus f95zone. Der User hat einen
-**Root-Ordner** mit vielen Container-Unterordnern; das Plugin
+Nicht Steam-Spiele mit `game/`-Marker-Ordner: Ren'Py-Adult-Visual-Novels
+aus f95zone. Der User hat einen **Root-Ordner** mit vielen Container-
+Unterordnern; das Plugin
 
 - erkennt jeden Container mit `game/` oder Version-Sub-Ordnern
   (`MyGame-0.240-pc/game/`) als Ren'Py-Spiel,
 - verknüpft jeden Container mit einem f95zone-Thread,
 - pollt die Threads periodisch auf neue Versionen und zeigt einen
   Update-Badge auf der Sidebar-Kachel,
-- installiert Update-ZIPs in einen **neuen Sub-Ordner** neben dem alten
-  und **kopiert die Save-Games** aus `game/saves/` automatisch mit —
-  Sub-Path-Rotation-Pattern aus RenPack.
+- installiert Update-ZIPs in einen neuen Sub-Ordner neben dem alten,
+  **kopiert die Save-Games** aus `game/saves/` automatisch mit,
+  löscht den alten Sub-Ordner und archiviert die ZIP in `archive/`,
+- bietet einen **RPA-Archive-Browser** + **Save-Editor** und einen
+  **Inline-Video-Player** (ffmpeg-MJPEG-Stream, kein LibVLC),
+- führt eine **KrosteMod-Pipeline** aus, die aus dekompilierten `.rpy`-
+  Dateien fertige Walkthrough-/Cheat-/Rename-Mods baut und ins `game/`
+  deployt.
 
 ## Aktivierung im Host
 
-Ab v0.3.0 (Multi-Tile): **Host-Wizard „🎮 Ordner mit Spielen scannen"**
-(Host v1.9.0+). Klick auf 🎮 in der Sidebar → Ren'Py-Root wählen →
-Host scannt rekursiv nach `game/`-Marker → „N Ren'Py-Spiele gefunden.
-Importieren?" → **pro Spiel** entsteht **eine eigene Sidebar-Kachel**,
-RenPyAssist übernimmt jede über engine-basiertes Matching
-(`target.engine = "renpy"`).
+**Host-Wizard „🎮 Ordner mit Spielen scannen"**: Klick auf 🎮 in der
+Sidebar → Ren'Py-Root wählen → Host scannt rekursiv nach `game/`-Marker
+→ „N Ren'Py-Spiele gefunden. Importieren?" → **pro Spiel** entsteht
+**eine eigene Sidebar-Kachel**, RenPyAssist übernimmt jede über engine-
+basiertes Matching (`target.engine = "renpy"`).
 
 Kein Steam-Bezug nötig. Jede Kachel ist ein eigener Container-Ordner
 (mit `game/`-Marker oder Sub-Version-Ordnern), Plugin rendert für jede
 eine Detail-View mit Cover, Version, Thread-URL, Actions.
 
-**Braucht Host v1.9.0 oder neuer.**
+**Braucht Host v1.10.3 oder neuer.**
 
-## Features (v0.3.0)
+## Tabs
 
-### Übersicht-Tab (pro Sidebar-Kachel)
-- Großes Cover (aus f95zone via CoverCache)
-- Titel + Update-Badge (grün wenn HasUpdate)
-- Sub-Path (welcher Version-Sub-Ordner ist aktiv)
-- Lokale Version + Remote Version + „zuletzt geprüft"-Zeitstempel
-- Inline-Editor für die f95zone-Thread-URL + 💾 Speichern
-- Actions: **▶ Start** (öffnet Ren'Py-Launcher), **⬆ Update installieren**
-  (ZIP-Picker → entpackt in neuen Sub-Ordner + kopiert Save-Games),
-  **🔄 Prüfen** (sofortiger f95zone-Poll), **📂 Ordner**
+### Übersicht
 
-### Einstellungen-Tab (plugin-global)
-- Downloads-Watch-Ordner (Default `~/Downloads`) — überwacht ZIPs
-- Update-Check-Intervall (Default 60 min, min 15 min)
-- **f95zone-Login** (User/Passwort → Session-Cookies verschlüsselt via
-  Host-`ISecretProtection` / DPAPI / libsecret abgelegt; Passwort landet
-  nie auf der Platte)
+- **Cover** (aus f95zone via CoverCache, AVIF/GIF/WebP → PNG via ffmpeg-
+  Thumbnail-Filter)
+- Titel + Genre-Tags + KI-übersetzte Beschreibung (System-Locale)
+- Lokale Version + Remote-Version + „zuletzt geprüft"
 
-### IUpdateNotifier
-Grüner ↑-Badge auf der Sidebar-Kachel: Summe aller Spiele mit
-verfügbarem Update. Tooltip zeigt die genaue Zahl.
+### Archive
+
+RPA-Browser für `.rpa`-Files im `game/`-Verzeichnis. Zeigt Index-Baum,
+Text-/Bild-/Video-Preview mit **Inline-Playback** (ffmpeg-MJPEG-Stream,
+12 fps, kein Audio — zum Screening reicht das) oder externem Player.
+Einzelnes File oder ganzes Archiv extrahieren.
+
+### Saves
+
+Ren'Py-Save-Editor (v0.4+): pickle-basierter Save-Reader mit
+Screenshot-Preview.
+
+### Mods (KrosteMod-Pipeline)
+
+Portiert aus RenPack. Plugin dekompiliert alle `.rpyc` via `unrpyc`,
+analysiert die `.rpy` und deployt einen fertigen Mod ins `game/`-Verzeichnis
+mit Uninstall-Manifest:
+
+- **Walkthrough** — Choice-Labels annotieren
+- **Cheat** — Money/Stat-Boosts injizieren
+- **Rename** — Character-Namen umbenennen (mit Batch-Text-Prompt)
+- **Translate** — KI-Batch-Übersetzung der Dialoge (via
+  `IHostServices.Ai`, konfiguriert im Host)
+
+### Einstellungen (plugin-global + spiel-spezifisch)
+
+Spiel-spezifisch: Thread-URL, ▶ Start, ⬆ Update installieren, 🔄 Prüfen,
+📂 Ordner, **✏ Ordner umbenennen** (Container-Rename via
+`IHostServices.TryRenameManualGame`, .renpyassist/-Metadaten wandern mit),
+🖼 Sidebar-Ausschnitt wählen.
+
+Plugin-global: Downloads-Watch-Ordner, Check-Intervall, **f95zone-Login**
+(User/Passwort → Session-Cookies verschlüsselt via Host-`ISecretProtection`
+/ DPAPI / libsecret abgelegt; Passwort landet nie auf der Platte).
 
 ## Sub-Path-Rotation
 
 Referenz: RenPack (`GamesRegistry.DetectRenpySubFolder`). Ein Container
-kann direktes `game/` haben (Legacy) oder mehrere Version-Sub-Ordner
-mit je eigenem `game/saves/`. Der Detektor priorisiert (1) direktes
-`game/`, dann (2/3) den Sub-Ordner mit der höchsten extrahierbaren
-Version. Bei Update wird nur `RenPyGame.ActiveSubPath` umgeschrieben —
-der neue ZIP-Sub-Ordner wird zur aktiven Version, der alte bleibt bis
-zur manuellen Aufräumung liegen.
+kann direktes `game/` haben (Legacy) oder mehrere Version-Sub-Ordner mit
+je eigenem `game/saves/`. Der Detektor priorisiert (1) direktes `game/`,
+dann (2/3) den Sub-Ordner mit der höchsten extrahierbaren Version. Bei
+Update wird `RenPyGame.ActiveSubPath` auf den neuen ZIP-Sub-Ordner
+umgeschrieben, Saves aus dem alten in den neuen kopiert, alter Sub-Ordner
+gelöscht, ZIP nach `<container>/archive/` verschoben.
 
 ## F95zone-Anbindung
 
 - **Login**: CSRF-Token-Handshake (`/login/` → `_xfToken` extrahieren →
   POST `/login/login`), Session-Cookies (`xf_user`, `xf_session`)
   verschlüsselt gespeichert.
-- **Thread-Metadata**: Titel aus `og:title`, Version-Regex auf
-  `[vX.Y.Z]`, Cover aus dem ersten
-  `attachments.f95zone.to/YYYY/MM/…`-Full-Size-Bild.
+- **Thread-Metadata**: Titel aus `og:title`, Version-Regex auf `[vX.Y.Z]`,
+  Cover aus dem ersten `attachments.f95zone.to/YYYY/MM/…`-Full-Size-Bild
+  (ohne `thumb/`-Prefix), Description aus dem ersten Post-Body,
+  Genre-Tags aus dem BB-Spoiler-Block.
 - **Cover-Cache**: SHA256(URL) als Dateiname, AVIF/WebP → PNG via
-  SixLabors.ImageSharp (keine ffmpeg-Abhängigkeit).
+  SixLabors.ImageSharp, animierte GIFs → repräsentatives Frame via
+  `ffmpeg -vf thumbnail -frames:v 1` (statt starrer Frame 0, der bei
+  Fade-In-Splash-Bildern oft weiß ist).
 - **Robustheit**: alle Methoden geben bei Fehler leere Liste / null
   zurück — kein Crash im Host wenn f95zone-Layout sich ändert.
+
+## Container-lokaler Metadaten-Store
+
+Pro Container liegt in `<container>/.renpyassist/`:
+
+- `game.json` — komplette Metadaten (ThreadUrl, CoverUrl, Description,
+  Genres, KI-Übersetzungen, ActiveSubPath, LocalVersion)
+- `cover.img` — Auto-Cover-Bild (PNG nach ffmpeg-Convert)
+- `sidebar-cover.png` — User-Custom-Ausschnitt (2:3-Portrait, hat Vorrang
+  in der Sidebar)
+
+Vorteil: wenn der User seine Sammlung auf einen anderen PC überträgt oder
+den Ordner umbenennt, kommt die Config automatisch mit.
 
 ## Installation
 
@@ -91,39 +132,43 @@ das ZIP entpacken nach:
 - **Linux:** `~/.config/KroModIx/plugins/kroste.renpyassist/`
 - **Windows:** `%APPDATA%\KroModIx\plugins\kroste.renpyassist\`
 
-Alternativ: 1-Klick-Install über die Install-Karte in der KroModIx-Sidebar
-(sobald `KroModIx.PluginIndex` den Eintrag hat).
+Alternativ: 1-Klick-Install über die Install-Karte in der KroModIx-Sidebar.
+
+**ffmpeg** wird für Video-Frame-Grab + Inline-Playback + AVIF/GIF-Cover-
+Convert gebraucht:
+
+- Fedora/Bazzite: `sudo dnf install ffmpeg-free`
+- Debian/Ubuntu: `sudo apt install ffmpeg`
+- Windows: `winget install ffmpeg`
+- macOS: `brew install ffmpeg`
+
+Ohne ffmpeg funktioniert das Plugin — Cover werden dann per ImageSharp
+konvertiert (kein AVIF), Video-Preview zeigt Install-Hint, externer
+Player läuft weiter.
 
 ## Erste Schritte
 
-1. Plugin über die Sidebar-Install-Karte installieren
-   (oder Release-ZIP manuell entpacken — siehe unten).
+1. Plugin über die Sidebar-Install-Karte installieren.
 2. In der Sidebar auf **🎮** (neben „➕ Spiel hinzufügen") klicken.
 3. Root-Ordner deiner Ren'Py-Sammlung wählen → **🔍 Scannen** →
    Host meldet „Ren'Py: N Spiele gefunden" → **Spiele importieren**.
 4. Die Sidebar hat jetzt **eine Kachel pro Ren'Py-Spiel**. Anklicken →
-   **Übersicht-Tab** zeigt Details des Spiels.
-5. Optional: **Einstellungen-Tab** → **f95zone-Login** eintragen
-   (für Cover-Downloads).
-6. Pro Spiel: f95zone-Thread-URL in das Inline-Feld einfügen, 💾 klicken
-   → Version-Poll läuft sofort, Cover erscheint automatisch.
-
-## Migration von v0.2 → v0.3
-
-Die alte Sammel-Kachel „Ren'Py Games" von v0.2 (SteamAppId 9000001)
-matched das v0.3-Plugin **nicht mehr**. Nach dem Update:
-
-- Alte Sammel-Kachel per Rechtsklick → „Aus Sidebar entfernen"
-  (der Ordner auf der Platte bleibt unberührt).
-- Wizard-Lauf erneut ausführen → jetzt entstehen Per-Spiel-Kacheln.
+   Detail-View mit den Tabs (Übersicht / Archive / Saves / Mods /
+   Einstellungen).
+5. Optional: Einstellungen-Tab → **f95zone-Login** eintragen (für Cover-
+   Downloads bei login-required Threads).
+6. Pro Spiel: f95zone-Thread-URL im Feld einfügen, 💾 klicken → Version-
+   Poll + Cover-Download + Description-KI-Übersetzung laufen im
+   Hintergrund.
 
 ## Referenz
 
 - **RenPack** (`github.com/Kroste/RenPack`) — Original-Referenz für
-  Sub-Path-Rotation und f95zone-Integration. Ren'Py Assist portiert die
+  Sub-Path-Rotation, f95zone-Integration, KrosteMod-Pipeline,
+  Media-Preview mit ffmpeg-MJPEG-Stream. Ren'Py Assist portiert die
   Kern-Logik in die KroModIx-Plugin-Architektur.
 - **F95zone** — [f95zone.to](https://f95zone.to/) (Forum + Attachment-
-  Hosting für Ren'Py-Adult-Games).
+  Hosting).
 
 ## Lizenz
 
