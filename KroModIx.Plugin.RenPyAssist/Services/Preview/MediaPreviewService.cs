@@ -1,6 +1,8 @@
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
+using System.Runtime.CompilerServices;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
@@ -102,6 +104,58 @@ public sealed class MediaPreviewService
         }
     }
 
+    /// <summary>Streamt Video-Frames als JPEG-Bytes für Inline-Preview
+    /// (kein Audio). Portiert 1:1 aus RenPack <c>MediaPlaybackService</c>:
+    /// ffmpeg mit <c>-f image2pipe -vcodec mjpeg</c> liefert JPEG-Frames
+    /// back-to-back durch stdout, <c>JpegStreamReader</c> parst SOI/EOI-
+    /// Marker. <c>-re</c> throttelt gegen Wanduhr (sonst Turbo-Speed).
+    /// Bewusst kein LibVLC — deployment-Chaos, Airspace-Probleme im UI.
+    ///
+    /// <para>Verhalten bei Abbruch (CancellationToken): ffmpeg wird gekilled,
+    /// letzter yield-Frame beendet die Enumeration ordentlich.</para></summary>
+    public async IAsyncEnumerable<byte[]> StreamFramesAsync(
+        string videoPath, int fps = 12,
+        [EnumeratorCancellation] CancellationToken ct = default)
+    {
+        if (!HasFfmpeg || !File.Exists(videoPath)) yield break;
+        if (fps < 1 || fps > 60) throw new ArgumentOutOfRangeException(nameof(fps));
+
+        var psi = new ProcessStartInfo(FfmpegPath!)
+        {
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+            CreateNoWindow = true,
+        };
+        psi.ArgumentList.Add("-nostdin");
+        // -re throttelt Input gegen die Wall-Clock (native Frame-Rate).
+        // Ohne das pumpt ffmpeg so schnell wie die Pipe schluckt →
+        // Turbo-Speed-Playback. -re MUSS vor -i stehen (Input-Option).
+        psi.ArgumentList.Add("-re");
+        psi.ArgumentList.Add("-i"); psi.ArgumentList.Add(videoPath);
+        psi.ArgumentList.Add("-vf"); psi.ArgumentList.Add($"fps={fps}");
+        psi.ArgumentList.Add("-f"); psi.ArgumentList.Add("image2pipe");
+        psi.ArgumentList.Add("-vcodec"); psi.ArgumentList.Add("mjpeg");
+        psi.ArgumentList.Add("-q:v"); psi.ArgumentList.Add("6"); // 2 (best) .. 31 (worst)
+        psi.ArgumentList.Add("-");
+
+        Process? proc;
+        try { proc = Process.Start(psi); }
+        catch (Exception ex) { Log.Warn(ex, "ffmpeg-Stream start fehlgeschlagen"); yield break; }
+        if (proc is null) yield break;
+
+        try
+        {
+            await foreach (var jpeg in JpegStreamReader.ReadAsync(proc.StandardOutput.BaseStream, ct))
+                yield return jpeg;
+        }
+        finally
+        {
+            try { if (!proc.HasExited) proc.Kill(entireProcessTree: true); } catch { }
+            try { proc.Dispose(); } catch { }
+        }
+    }
+
     /// <summary>Schreibt Bytes in eine Temp-Datei und öffnet sie mit dem
     /// System-Default-Player (Video/Audio). Rückgabe: der Temp-Pfad (bleibt
     /// liegen für Playback-Dauer; Caller sollte selbst aufräumen).</summary>
@@ -115,6 +169,61 @@ public sealed class MediaPreviewService
             return tmp;
         }
         catch (Exception ex) { Log.Warn(ex, "OpenExternal failed"); return null; }
+    }
+
+    /// <summary>Liest einen MJPEG-Stream (JPEG-Frames back-to-back) frame-
+    /// für-frame. Nutzt SOI (0xFF 0xD8) / EOI (0xFF 0xD9)-Marker um Frame-
+    /// Grenzen zu finden. Portiert aus RenPack.</summary>
+    internal static class JpegStreamReader
+    {
+        private const byte Marker = 0xFF;
+        private const byte Soi = 0xD8;
+        private const byte Eoi = 0xD9;
+        private const int ReadBufferSize = 64 * 1024;
+
+        public static async IAsyncEnumerable<byte[]> ReadAsync(
+            Stream input, [EnumeratorCancellation] CancellationToken ct)
+        {
+            var buffer = new List<byte>(ReadBufferSize * 2);
+            var read = new byte[ReadBufferSize];
+            bool eofReached = false;
+
+            while (true)
+            {
+                while (TryExtractFrame(buffer, out var frame))
+                    yield return frame;
+
+                if (eofReached) yield break;
+
+                ct.ThrowIfCancellationRequested();
+                int n;
+                try { n = await input.ReadAsync(read.AsMemory(), ct); }
+                catch (OperationCanceledException) { yield break; }
+                if (n <= 0) { eofReached = true; continue; }
+
+                for (int i = 0; i < n; i++) buffer.Add(read[i]);
+            }
+        }
+
+        private static bool TryExtractFrame(List<byte> buffer, out byte[] frame)
+        {
+            frame = Array.Empty<byte>();
+            int soiPos = -1;
+            for (int i = 0; i < buffer.Count - 1; i++)
+                if (buffer[i] == Marker && buffer[i + 1] == Soi) { soiPos = i; break; }
+            if (soiPos < 0) return false;
+
+            int eoiPos = -1;
+            for (int i = soiPos + 2; i < buffer.Count - 1; i++)
+                if (buffer[i] == Marker && buffer[i + 1] == Eoi) { eoiPos = i; break; }
+            if (eoiPos < 0) return false;
+
+            int frameLen = eoiPos + 2 - soiPos;
+            frame = new byte[frameLen];
+            buffer.CopyTo(soiPos, frame, 0, frameLen);
+            buffer.RemoveRange(0, eoiPos + 2);
+            return true;
+        }
     }
 
     private static string? ResolveFfmpeg()

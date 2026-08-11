@@ -26,7 +26,15 @@ public sealed class ArchivesView : UserControl
         var extractAllBtn = new Button { Content = "⬇⬇  Alles entpacken" };
         extractAllBtn.Bind(Button.CommandProperty, new Binding(nameof(ArchivesViewModel.ExtractAllCommand)));
 
-        var externBtn = new Button { Content = "▶  Extern öffnen" };
+        // v0.9: Inline-Video-Playback via ffmpeg-MJPEG-Stream.
+        // Sichtbar wenn Video + ffmpeg da. Label toggelt Play/Stopp.
+        var inlinePlayBtn = new Button();
+        inlinePlayBtn.Classes.Add("accent");
+        inlinePlayBtn.Bind(Button.ContentProperty, new Binding(nameof(ArchivesViewModel.InlinePlayButtonLabel)));
+        inlinePlayBtn.Bind(Button.CommandProperty, new Binding(nameof(ArchivesViewModel.ToggleInlinePlaybackCommand)));
+        inlinePlayBtn.Bind(Button.IsVisibleProperty, new Binding(nameof(ArchivesViewModel.CanInlinePlay)));
+
+        var externBtn = new Button { Content = "⤴  Extern öffnen" };
         externBtn.Classes.Add("ghost");
         externBtn.Bind(Button.CommandProperty, new Binding(nameof(ArchivesViewModel.OpenExternalCommand)));
 
@@ -34,7 +42,7 @@ public sealed class ArchivesView : UserControl
         {
             Orientation = Orientation.Horizontal, Spacing = 8,
             Margin = new Thickness(0, 0, 0, 10),
-            Children = { scanBtn, extractBtn, extractAllBtn, externBtn },
+            Children = { scanBtn, extractBtn, extractAllBtn, inlinePlayBtn, externBtn },
         };
 
         var status = new TextBlock { Margin = new Thickness(0, 0, 0, 8) };

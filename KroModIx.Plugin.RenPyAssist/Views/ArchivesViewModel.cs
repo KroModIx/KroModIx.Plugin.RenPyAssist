@@ -2,6 +2,7 @@ using System;
 using System.Collections.ObjectModel;
 using System.IO;
 using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
 using Avalonia.Media.Imaging;
 using Avalonia.Threading;
@@ -32,6 +33,22 @@ public sealed partial class ArchivesViewModel : ObservableObject
     [ObservableProperty] private string? _previewInfo;
     private bool _canPlayExternal;
     public bool CanPlayExternal => _canPlayExternal;
+
+    /// <summary>v0.9: Inline-Video-Playback. True wenn aktuelles Entry ein
+    /// Video ist UND ffmpeg installiert ist. Steuert Sichtbarkeit
+    /// des ▶-Buttons.</summary>
+    [ObservableProperty] private bool _canInlinePlay;
+    /// <summary>Läuft die MJPEG-Frame-Schleife gerade — steuert Play/Pause-
+    /// Beschriftung + verhindert Doppel-Start.</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(InlinePlayButtonLabel))]
+    private bool _isPlayingInline;
+
+    public string InlinePlayButtonLabel => IsPlayingInline ? "⏸  Stopp" : "▶  Inline abspielen";
+    private CancellationTokenSource? _inlinePlayCts;
+    // Temp-File des aktuell selektierten Video-Entries (aus RPA extrahiert).
+    // Wird bei jeder neuen Preview aufgeräumt.
+    private string? _currentVideoTempPath;
 
     public ObservableCollection<ArchiveRow> Archives { get; } = new();
     public ObservableCollection<EntryRow> Entries { get; } = new();
@@ -110,8 +127,11 @@ public sealed partial class ArchivesViewModel : ObservableObject
 
     private async Task LoadPreviewAsync(EntryRow? row)
     {
+        StopInlinePlayback();
+        CleanupVideoTempFile();
         PreviewText = null; PreviewImage = null; PreviewInfo = null;
         _canPlayExternal = false;
+        CanInlinePlay = false;
         if (row is null || SelectedArchive?.Archive is null) return;
         var archivePath = SelectedArchive.FullPath;
         var entry = row.Entry;
@@ -147,7 +167,29 @@ public sealed partial class ArchivesViewModel : ObservableObject
                         Path.GetExtension(entry.Path));
                     if (frame is not null) LoadBitmap(frame);
                     else PreviewInfo += " · Video-Frame-Grab fehlgeschlagen (ffmpeg?)";
-                    PreviewInfo += " · Klick aufs Bild oder ▶ Extern öffnen für Playback";
+                    // v0.9: Temp-File anlegen für Inline-Playback (StreamFrames
+                    // braucht Datei-Pfad, kein Byte-Stream). Wird bei nächster
+                    // Selection/Cleanup gelöscht.
+                    if (_preview.HasFfmpeg)
+                    {
+                        _currentVideoTempPath = Path.Combine(Path.GetTempPath(),
+                            $"renpyassist-video-{Guid.NewGuid():N}{Path.GetExtension(entry.Path)}");
+                        try
+                        {
+                            await File.WriteAllBytesAsync(_currentVideoTempPath, bytes);
+                            CanInlinePlay = true;
+                            PreviewInfo += " · ▶ Inline abspielen oder ⤴ Extern öffnen";
+                        }
+                        catch
+                        {
+                            CleanupVideoTempFile();
+                            PreviewInfo += " · Inline-Playback nicht möglich (Temp-File)";
+                        }
+                    }
+                    else
+                    {
+                        PreviewInfo += " · ffmpeg fehlt — nur externer Player";
+                    }
                     _canPlayExternal = true;
                     break;
                 case PreviewKind.Audio:
@@ -175,6 +217,64 @@ public sealed partial class ArchivesViewModel : ObservableObject
             Dispatcher.UIThread.Post(() => PreviewImage = bmp);
         }
         catch { PreviewInfo += " · Bild-Decode fehlgeschlagen"; }
+    }
+
+    /// <summary>v0.9: Toggle für Inline-Video-Playback. Nutzt ffmpeg-MJPEG-
+    /// Frame-Stream (12 fps, kein Audio) — jeder Frame ersetzt das Bitmap im
+    /// Preview-Image-Widget. Zweiter Klick pausiert (CancellationToken killt
+    /// den ffmpeg-Prozess). Bewusst kein LibVLC — deployment-Chaos + Airspace.
+    /// Portiert 1:1 aus RenPack <c>PreviewViewModel.ToggleInlinePlaybackAsync</c>.</summary>
+    [RelayCommand]
+    private async Task ToggleInlinePlaybackAsync()
+    {
+        if (IsPlayingInline)
+        {
+            StopInlinePlayback();
+            return;
+        }
+        if (!_preview.HasFfmpeg || _currentVideoTempPath is null
+            || !File.Exists(_currentVideoTempPath)) return;
+
+        _inlinePlayCts = new CancellationTokenSource();
+        var ct = _inlinePlayCts.Token;
+        IsPlayingInline = true;
+        var path = _currentVideoTempPath;
+
+        try
+        {
+            await foreach (var jpeg in _preview.StreamFramesAsync(path, fps: 12, ct))
+            {
+                ct.ThrowIfCancellationRequested();
+                Bitmap bmp;
+                using (var ms = new MemoryStream(jpeg)) bmp = new Bitmap(ms);
+                await Dispatcher.UIThread.InvokeAsync(() => PreviewImage = bmp);
+            }
+        }
+        catch (OperationCanceledException) { /* normal: Stop-Klick oder Selection-Change */ }
+        catch (Exception ex)
+        {
+            _host.Logger.Warn(ex, "Inline-Playback fehlgeschlagen: {Path}", path);
+        }
+        finally
+        {
+            await Dispatcher.UIThread.InvokeAsync(() => IsPlayingInline = false);
+        }
+    }
+
+    private void StopInlinePlayback()
+    {
+        try { _inlinePlayCts?.Cancel(); } catch { }
+        _inlinePlayCts?.Dispose();
+        _inlinePlayCts = null;
+        IsPlayingInline = false;
+    }
+
+    private void CleanupVideoTempFile()
+    {
+        if (_currentVideoTempPath is null) return;
+        try { if (File.Exists(_currentVideoTempPath)) File.Delete(_currentVideoTempPath); }
+        catch { }
+        _currentVideoTempPath = null;
     }
 
     [RelayCommand]
