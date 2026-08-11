@@ -42,11 +42,11 @@ public sealed partial class ModsViewModel : ObservableObject
         new(ModTypeId.Cheat, "Cheat", "💰",
             "F11-Overlay im Spiel: alle Store-Variablen live editieren (Geld, Beziehungswerte, Flags)."),
         new(ModTypeId.Rename, "Rename", "✏",
-            "Character-Umbenennung inkl. konsistentem Text-Umschreiben via KI (Grammatik!). " +
-            "Für Rename ohne KI: nur Character-Objekt-Namen werden getauscht. " +
-            "v0.6.0: automatisch, ohne explizites Mapping-UI (kommt v0.6.1)."),
-        // Translate: v0.7 — TranslationConfig braucht Pre-translated strings,
-        // Batch-KI-Loop muss separat ausgeführt werden. Zu komplex für v0.6.0.
+            "Character-Umbenennung mit Editor-Dialog (Alt→Neu). Wenn KI konfiguriert: " +
+            "Body-Texte werden konsistent umgeschrieben (Grammatik, Beziehungswörter)."),
+        new(ModTypeId.Translate, "Translate", "🌐",
+            "KI-Batch-Übersetzung aller Dialoge in eine Zielsprache. Braucht Host-KI " +
+            "(Ollama/Cloud). Ollama: ~5-10 s/Batch, Cloud: ~2-3 s/Batch. Bei 500 Says ≈ 1-3 min."),
     };
 
     public ModsViewModel(string containerPath, string? activeSubPath,
@@ -131,24 +131,81 @@ public sealed partial class ModsViewModel : ObservableObject
     private RenameConfig? AskRenameConfig(IReadOnlyList<RpyCharacter> characters,
         IReadOnlyList<RpySayStatement> sayStatements)
     {
-        // Für v0.6.0: keine UI, nur Character-Object-Rename via Prompt.
-        // v0.6.1 bekommt einen richtigen Dialog mit DataGrid.
-        Dispatcher.UIThread.Post(async () =>
-            await _host.Dialogs.ShowMessageAsync("Rename-Konfiguration",
-                $"{characters.Count} Character(e) erkannt: " +
-                string.Join(", ", characters.Take(10).Select(c => $"{c.VarName}=„{c.DisplayName}\"")) +
-                (characters.Count > 10 ? " …" : "") + "\n\n" +
-                "v0.6.0: automatisch Character-Object-Rename mit KI-Body-Rewriter (falls KI verfügbar). " +
-                "Explizite Mappings-UI kommt in v0.6.1."));
-        // Empty mapping = kein Rename, aber Analyse läuft trotzdem. Für v0.6.0 überspringen.
-        return null;
+        // Läuft auf Worker-Thread (via Task.Run vom Build). Modal-Dialog
+        // braucht UI-Thread → InvokeAsync-Hop.
+        return Dispatcher.UIThread.InvokeAsync(async () =>
+        {
+            var dialog = new RenameConfigDialog(characters);
+            var owner = MainWindow();
+            if (owner is not null) await dialog.ShowDialog(owner); else dialog.Show();
+            return dialog.Result;
+        }).GetAwaiter().GetResult();
     }
 
     private TranslationConfig? AskTranslationConfig(ModAnalysis analysis)
     {
-        // v0.6.0: Translate nicht unterstützt. Callback kehrt null zurück
-        // (User-Cancel-Semantik) — der Builder bricht den Translate-Build ab.
-        return null;
+        // 1. Sprach-Wahl vom User via Setup-Dialog
+        var sayTexts = analysis.SayStatements
+            .Select(s => s.RawTextInFile)
+            .Where(t => !string.IsNullOrWhiteSpace(t))
+            .ToList();
+        var uniqueTexts = sayTexts.Distinct(StringComparer.Ordinal).ToList();
+
+        var setupResult = Dispatcher.UIThread.InvokeAsync(async () =>
+        {
+            var dialog = new TranslateSetupDialog(sayTexts.Count, uniqueTexts.Count);
+            var owner = MainWindow();
+            if (owner is not null) await dialog.ShowDialog(owner); else dialog.Show();
+            return dialog.SelectedLanguage;
+        }).GetAwaiter().GetResult();
+
+        if (setupResult is not TargetLanguage targetLang) return null;
+
+        // 2. KI-Batch-Übersetzung (blockiert, aber wir sind bereits im Worker-
+        // Thread des Build-Prozesses; StatusText-Updates gehen per Dispatcher)
+        try
+        {
+            Dispatcher.UIThread.Post(() =>
+            {
+                StatusText = $"🌐 KI-Übersetzung ({targetLang.ToNativeName()}) läuft …";
+                ProgressCurrent = 0;
+                ProgressTotal = uniqueTexts.Count;
+            });
+
+            var translator = new KrosteAiTranslator(new HostAiProviderAdapter(_host));
+            var progress = new Progress<AiTranslateProgress>(p => Dispatcher.UIThread.Post(() =>
+            {
+                ProgressCurrent = p.Done;
+                ProgressTotal = p.Total;
+                ProgressFile = $"KI-Übersetzung {p.CurrentLanguage.ToNativeName()}";
+            }));
+            var translated = translator.TranslateAsync(uniqueTexts, targetLang,
+                sourceLanguage: TargetLanguage.English,
+                progress: progress).GetAwaiter().GetResult();
+
+            var byLang = new Dictionary<TargetLanguage, IReadOnlyDictionary<string, string>>
+            {
+                [targetLang] = translated,
+            };
+            return new TranslationConfig(
+                TargetLanguages: new[] { targetLang },
+                SourceLanguage: TargetLanguage.English,
+                TranslatedStrings: byLang);
+        }
+        catch (Exception ex)
+        {
+            _host.Logger.Warn(ex, "KI-Batch-Übersetzung fehlgeschlagen");
+            Dispatcher.UIThread.Post(() =>
+                StatusText = "KI-Übersetzung fehlgeschlagen: " + ex.Message);
+            return null;
+        }
+    }
+
+    private static Avalonia.Controls.Window? MainWindow()
+    {
+        return Avalonia.Application.Current?.ApplicationLifetime
+            is Avalonia.Controls.ApplicationLifetimes.IClassicDesktopStyleApplicationLifetime desk
+            ? desk.MainWindow : null;
     }
 
     [RelayCommand]
