@@ -175,6 +175,102 @@ public sealed class RenpyArchiveService
         IProgress<RpaProgress>? progress = null, CancellationToken cancellationToken = default)
         => Extract(archive, archive.Entries, destinationDirectory, progress, cancellationToken);
 
+    /// <summary>Typische Dev-Artefakte, die niemand in einem Ren'Py-Archiv
+    /// haben will (v0.6+ für Modding-Repack).</summary>
+    public static readonly HashSet<string> DefaultIgnoreNames = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ".DS_Store", "Thumbs.db", "desktop.ini", ".gitignore", ".gitattributes",
+    };
+    public static readonly HashSet<string> DefaultIgnoreDirs = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "__pycache__", ".git", ".svn", ".hg", ".vs", ".idea", "node_modules",
+    };
+
+    public static bool ShouldIgnore(string relativePath)
+    {
+        if (DefaultIgnoreNames.Contains(Path.GetFileName(relativePath))) return true;
+        foreach (var seg in relativePath.Replace('\\', '/').Split('/'))
+            if (DefaultIgnoreDirs.Contains(seg)) return true;
+        return false;
+    }
+
+    /// <summary>Erstellt ein neues RPA-Archiv aus einem Quell-Ordner. Wird
+    /// von <see cref="Modding.OneClickModBuilder"/> für den Mixed-Archive-
+    /// Repack gebraucht (Assets behalten, Scripts droppen).</summary>
+    public int Create(string archivePath, string sourceDirectory,
+        RpaVersion version = RpaVersion.V3_0, uint key = DefaultKey,
+        IProgress<RpaProgress>? progress = null, CancellationToken cancellationToken = default)
+    {
+        if (version == RpaVersion.V2_0) key = 0;
+
+        string srcRootProbe = Path.GetFullPath(sourceDirectory);
+        var files = Directory.EnumerateFiles(sourceDirectory, "*", SearchOption.AllDirectories)
+            .Where(f => !ShouldIgnore(Path.GetRelativePath(srcRootProbe, Path.GetFullPath(f))))
+            .OrderBy(static f => f, StringComparer.Ordinal)
+            .ToList();
+
+        int headerLen = BuildHeader(version, 0, key).Length;
+        string srcRoot = Path.GetFullPath(sourceDirectory);
+
+        using var fs = File.Create(archivePath);
+        fs.Write(new byte[headerLen]);
+
+        var index = new Dictionary<string, object>(files.Count);
+        var buffer = new byte[81920];
+        int done = 0;
+        foreach (var file in files)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            string rel = Path.GetRelativePath(srcRoot, Path.GetFullPath(file)).Replace('\\', '/');
+            long offset = fs.Position;
+            long length;
+            using (var input = File.OpenRead(file))
+            {
+                length = input.Length;
+                int read;
+                while ((read = input.Read(buffer, 0, buffer.Length)) > 0)
+                    fs.Write(buffer, 0, read);
+            }
+            long storedOffset = offset ^ key;
+            long storedLength = length ^ key;
+            index[rel] = new object[] { new object[] { storedOffset, storedLength } };
+            done++;
+            progress?.Report(new RpaProgress(done, files.Count, rel));
+        }
+
+        long indexOffset = fs.Position;
+        byte[] pickled;
+        using (var pickler = new Pickler())
+            pickled = pickler.dumps(index);
+        byte[] compressed = ZlibCompress(pickled);
+        fs.Write(compressed);
+
+        fs.Seek(0, SeekOrigin.Begin);
+        byte[] header = Encoding.ASCII.GetBytes(BuildHeader(version, indexOffset, key));
+        if (header.Length != headerLen)
+            throw new InvalidOperationException("Header-Länge inkonsistent.");
+        fs.Write(header);
+
+        Log.Info("Archiv erstellt: {Count} Datei(en), IndexOffset 0x{Off:x}", done, indexOffset);
+        return done;
+    }
+
+    private static string BuildHeader(RpaVersion version, long indexOffset, uint key) => version switch
+    {
+        RpaVersion.V2_0 => $"RPA-2.0 {indexOffset:x16}\n",
+        RpaVersion.V3_0 => $"RPA-3.0 {indexOffset:x16} {key:x8}\n",
+        RpaVersion.V3_2 => $"RPA-3.2 {indexOffset:x16} 0 {key:x8}\n",
+        _ => throw new ArgumentOutOfRangeException(nameof(version)),
+    };
+
+    private static byte[] ZlibCompress(byte[] data)
+    {
+        using var ms = new MemoryStream();
+        using (var z = new ZLibStream(ms, CompressionLevel.Optimal, leaveOpen: true))
+            z.Write(data, 0, data.Length);
+        return ms.ToArray();
+    }
+
     // ---- intern -----------------------------------------------------------
 
     private void ExtractEntryCore(Stream archive, RpaEntry entry, string destinationFile)

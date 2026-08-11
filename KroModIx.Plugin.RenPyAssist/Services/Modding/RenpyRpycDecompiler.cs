@@ -1,0 +1,1426 @@
+using System.Collections;
+using System.Globalization;
+using System.Text;
+using NLog;
+using Razorvine.Pickle.Objects;
+
+namespace KroModIx.Plugin.RenPyAssist.Services.Modding;
+
+/// <summary>
+/// Wandelt die AST-Statement-Liste aus <see cref="RenpyRpycService"/> zurück in
+/// Ren'Py-Skript-Quelltext. Deckt Label/Say/Menu/Jump/Call/Return/If/Show/
+/// Scene/Hide/With/Python/Init/Pass/Define/Default/UserStatement/Screen/Style/
+/// Transform/ATL/LayeredImage ab; unbekannte Nodes werden als Kommentar
+/// (<c># &lt;unknown: mod.Class&gt;</c>) mit ausgegeben, damit der
+/// Zeilenversatz erhalten bleibt.
+///
+/// Delegiert an <see cref="RenpySlWriter"/> fuer Screens und
+/// <see cref="RenpyAtlWriter"/> fuer ATL-Bloecke. Signature-Params und
+/// Style-Properties werden vor dem Emit via <see cref="SignatureOrderPatcher"/>
+/// in korrekte Insertion-Order gebracht (Razorvine.Pickle-Hashtable-Order-Fix).
+/// Cross-platform, keine Python-Dependency.
+/// </summary>
+public sealed class RenpyRpycDecompiler
+{
+    private static readonly Logger Log = LogManager.GetCurrentClassLogger();
+    private const string Indent = "    ";
+
+    public string Decompile(IReadOnlyList<object?> statements)
+    {
+        var sb = new StringBuilder();
+        // Immer LF, nie CRLF — Ren'Py-Quelldateien sind LF-normalisiert und
+        // Tests vergleichen gegen "\n". sb.AppendLine() wuerde auf Windows
+        // "\r\n" produzieren und den Windows-CI-Build brechen.
+        sb.Append("# Decompiled by RenPack\n");
+        sb.Append('\n');
+
+        // Vor dem Emit: Transform-Aufrufe mit Argumenten sammeln. Ren'Py
+        // speichert die Transform-Parameter nicht im rpyc — wenn ein Screen
+        // "at flying_transform(msg[…])" ruft und der Transform bei uns ohne
+        // Parameter emittiert wird, interpretiert Ren'Py das Argument als
+        // Child-Displayable → "Not a displayable: 0". Wir merken uns die
+        // Namen inklusive Argument-Anzahl und ergänzen bei der Transform-
+        // Deklaration passend viele Fallback-Parameter.
+        _transformCallArgCount = CollectTransformCallArgCounts(statements);
+        // Und die *echten* Parameternamen aus dem ATL-Body raten: jeder
+        // Python-Identifier, der weder Keyword noch Ren'Py-Global ist, ist
+        // mit hoher Wahrscheinlichkeit ein Parameter — sonst würde Ren'Py
+        // ihn zur Laufzeit als NameError aufmachen.
+        _transformParamNames = CollectTransformParamNames(statements);
+
+        // `init offset = N`-Optimierung: wenn eine bestimmte non-zero-Priority
+        // dominiert (>= 50% aller Init-Statements), emittieren wir einmal am
+        // Top einen Offset-Header. Nachfolgende Init-Wrapper mit dieser Prio
+        // koennen dann OHNE `init N`-Prefix stehen — der Compiler wickelt sie
+        // beim Rekompilieren automatisch wieder in Init(priority=N).
+        _defaultInitOffset = DetermineDefaultInitOffset(statements);
+        if (_defaultInitOffset != 0)
+        {
+            sb.Append($"init offset = {_defaultInitOffset}\n");
+            sb.Append('\n');
+        }
+
+        // Compiler-Artefakt: Ren'Py haengt implizit ein `return` als letzten
+        // Top-Level-Statement an jede .rpy an (repraesentiert das File-Ende).
+        // User schreibt das nicht — bei uns wuerde es als leeres `return` am
+        // Dateiende landen. Wenn wir es finden: weg damit.
+        var effective = statements;
+        if (statements.Count > 0
+            && statements[^1] is ClassDict lastNode
+            && lastNode.ClassName == "renpy.ast.Return"
+            && lastNode.GetValueOrDefault("expression") is null)
+        {
+            effective = statements.Take(statements.Count - 1).ToList();
+        }
+
+        EmitBlock(sb, effective, indent: 0);
+        return sb.ToString();
+    }
+
+    /// <summary>Scannt die Top-Level-Statements nach der dominanten
+    /// Init-Priority. Gibt die Priority zurueck, wenn sie mind. 50% der
+    /// Init-Statements ausmacht und != 0 ist — sonst 0 (kein Offset-Header).</summary>
+    private static int DetermineDefaultInitOffset(IReadOnlyList<object?> statements)
+    {
+        var counts = new Dictionary<int, int>();
+        int total = 0;
+        foreach (var s in statements)
+        {
+            if (s is not ClassDict cd || cd.ClassName != "renpy.ast.Init") continue;
+            int p = cd.GetValueOrDefault("priority") is int v ? v : 0;
+            counts[p] = counts.GetValueOrDefault(p) + 1;
+            total++;
+        }
+        if (total < 2) return 0; // 1 Init lohnt keinen Header-Aufwand
+        var best = counts.OrderByDescending(kv => kv.Value).First();
+        if (best.Key == 0) return 0;
+        if (best.Value < 2) return 0; // die dominante Prio muss selbst >= 2 sein
+        if (best.Value * 2 < total) return 0; // weniger als 50%
+        return best.Key;
+    }
+
+    private int _defaultInitOffset;
+
+    private Dictionary<string, int> _transformCallArgCount = new(StringComparer.Ordinal);
+    private Dictionary<string, List<string>> _transformParamNames = new(StringComparer.Ordinal);
+
+    private static Dictionary<string, int> CollectTransformCallArgCounts(IEnumerable statements)
+    {
+        var result = new Dictionary<string, int>(StringComparer.Ordinal);
+        var seen = new HashSet<object>(ReferenceEqualityComparer.Instance);
+        // Fängt `NAME(...)` — mit Klammern-Balancierung, damit
+        // `flying_transform(msg["slot_index"])` als 1-arg zählt, nicht als
+        // Text.
+        var callPattern = new System.Text.RegularExpressions.Regex(
+            @"([A-Za-z_][A-Za-z0-9_]*)\s*\(",
+            System.Text.RegularExpressions.RegexOptions.Compiled);
+
+        void Record(string call)
+        {
+            foreach (System.Text.RegularExpressions.Match m in callPattern.Matches(call))
+            {
+                string name = m.Groups[1].Value;
+                int openPos = m.Index + m.Length - 1; // Position der '('
+                int argCount = CountArgs(call, openPos);
+                if (!result.TryGetValue(name, out var prev) || prev < argCount)
+                    result[name] = argCount;
+            }
+        }
+
+        void Walk(object? o)
+        {
+            if (o is null || (o.GetType().IsClass && !seen.Add(o))) return;
+            if (o is ClassDict cd)
+            {
+                if (cd.ClassName == "renpy.sl2.slast.SLDisplayable"
+                    && cd.TryGetValue("keyword", out var kws) && kws is IEnumerable kwEnum)
+                {
+                    foreach (var kv in kwEnum)
+                    {
+                        if (kv is object[] arr && arr.Length >= 2
+                            && AsString(arr[0]) == "at")
+                        {
+                            Record(ExtractPyExprString(arr[1]));
+                        }
+                    }
+                }
+                foreach (var v in cd.Values) Walk(v);
+            }
+            else if (o is IEnumerable en && o is not string)
+                foreach (var v in en) Walk(v);
+        }
+        Walk(statements);
+        return result;
+    }
+
+    /// <summary>Zählt die Top-Level-Komma-getrennten Argumente in einem
+    /// Python-Call ab der Position der öffnenden Klammer. Respektiert
+    /// verschachtelte Klammern und Strings, sodass
+    /// <c>foo(a, [b, c], d)</c> als 3 Argumente gezählt wird, nicht 4.</summary>
+    private static int CountArgs(string text, int openParenPos)
+    {
+        if (openParenPos >= text.Length || text[openParenPos] != '(') return 0;
+        int i = openParenPos + 1;
+        // Leere Klammern: ()
+        while (i < text.Length && char.IsWhiteSpace(text[i])) i++;
+        if (i < text.Length && text[i] == ')') return 0;
+
+        int depth = 0;      // Klammern-Tiefe (relative zu openParenPos)
+        int args = 1;
+        char strChar = '\0';
+        for (; i < text.Length; i++)
+        {
+            char c = text[i];
+            if (strChar != '\0')
+            {
+                if (c == '\\' && i + 1 < text.Length) { i++; continue; }
+                if (c == strChar) strChar = '\0';
+                continue;
+            }
+            if (c == '"' || c == '\'') { strChar = c; continue; }
+            if (c is '(' or '[' or '{') depth++;
+            else if (c is ')' or ']' or '}')
+            {
+                if (depth == 0) return args;
+                depth--;
+            }
+            else if (c == ',' && depth == 0) args++;
+        }
+        return args;
+    }
+
+    private static string ExtractPyExprString(object? v)
+    {
+        if (v is string s) return s;
+        if (v is ClassDict cd)
+        {
+            if (cd.TryGetValue("__args__", out var av) && av is object[] { Length: > 0 } args
+                && args[0] is string first) return first;
+        }
+        return v?.ToString() ?? "";
+    }
+
+    /// <summary>Walkt alle <c>renpy.ast.Transform</c>-Nodes und rät die
+    /// Original-Parameternamen: jeder freie Python-Identifier im ATL-Body,
+    /// der kein Python-Keyword, Ren'Py-Global oder ATL-Warper ist, dürfte
+    /// ein Transform-Parameter sein — sonst würde er zur Laufzeit als
+    /// <c>NameError</c> knallen. Reihenfolge = Reihenfolge des ersten
+    /// Vorkommens im Body (grobe Näherung an die Original-Parameter-
+    /// Signatur, exakt lässt es sich aus dem rpyc nicht rekonstruieren).</summary>
+    private static Dictionary<string, List<string>> CollectTransformParamNames(IEnumerable statements)
+    {
+        var result = new Dictionary<string, List<string>>(StringComparer.Ordinal);
+        var seen = new HashSet<object>(ReferenceEqualityComparer.Instance);
+        void Walk(object? o)
+        {
+            if (o is null || (o.GetType().IsClass && !seen.Add(o))) return;
+            if (o is ClassDict cd)
+            {
+                if (cd.ClassName == "renpy.ast.Transform")
+                {
+                    string name = AsString(cd.GetValueOrDefault("varname") ?? cd.GetValueOrDefault("name"));
+                    var idents = new List<string>();
+                    var uniq = new HashSet<string>(StringComparer.Ordinal);
+                    foreach (var expr in CollectPyExprStrings(cd.GetValueOrDefault("atl")))
+                        foreach (var id in ExtractFreeIdentifiers(expr))
+                            if (uniq.Add(id)) idents.Add(id);
+                    if (idents.Count > 0) result[name] = idents;
+                }
+                foreach (var v in cd.Values) Walk(v);
+            }
+            else if (o is IEnumerable en && o is not string)
+                foreach (var v in en) Walk(v);
+        }
+        Walk(statements);
+        return result;
+    }
+
+    /// <summary>Sammelt alle in einem AST-Teilbaum enthaltenen PyExpr-
+    /// Ausdrücke (Class-Namen enden mit <c>PyExpr</c> oder <c>PyCode</c>) —
+    /// beim Unpickeln landet der Ausdruck-Text in <c>__args__[0]</c>.</summary>
+    private static List<string> CollectPyExprStrings(object? root)
+    {
+        var results = new List<string>();
+        var seen = new HashSet<object>(ReferenceEqualityComparer.Instance);
+        void Walk(object? o)
+        {
+            if (o is null || (o.GetType().IsClass && !seen.Add(o))) return;
+            if (o is ClassDict cd)
+            {
+                if ((cd.ClassName.EndsWith("PyExpr", StringComparison.Ordinal)
+                     || cd.ClassName.EndsWith("PyCode", StringComparison.Ordinal))
+                    && cd.TryGetValue("__args__", out var av)
+                    && av is object[] { Length: >= 1 } args
+                    && args[0] is string first
+                    && !string.IsNullOrWhiteSpace(first))
+                    results.Add(first);
+                foreach (var v in cd.Values) Walk(v);
+            }
+            else if (o is IEnumerable en && o is not string)
+                foreach (var v in en) Walk(v);
+        }
+        Walk(root);
+        return results;
+    }
+
+    /// <summary>Python-Keywords, Builtins, Ren'Py-Namespaces und ATL-Warper —
+    /// alles, was in einer PyExpr auftauchen kann, aber kein Parameter ist.</summary>
+    private static readonly HashSet<string> NonParameterIdentifiers = new(StringComparer.Ordinal)
+    {
+        "True", "False", "None",
+        "and", "or", "not", "if", "else", "for", "in", "is", "lambda",
+        "int", "float", "str", "bool", "list", "dict", "tuple", "set",
+        "range", "len", "min", "max", "abs", "round", "map", "filter", "sum",
+        "any", "all", "sorted", "reversed", "enumerate", "zip",
+        "renpy", "store", "persistent", "config", "gui", "preferences",
+        "math", "random", "_", "_p",
+        "linear", "ease", "easein", "easeout",
+        "easein_quad", "easeout_quad", "easein_cubic", "easeout_cubic",
+        "easein_quart", "easeout_quart", "easein_quint", "easeout_quint",
+        "easein_expo", "easeout_expo", "easein_circ", "easeout_circ",
+        "easein_back", "easeout_back", "easein_bounce", "easeout_bounce",
+        "easein_elastic", "easeout_elastic",
+        "pause", "time", "repeat", "parallel", "block", "choice", "on",
+        "event", "function", "contains", "clockwise", "counterclockwise",
+    };
+
+    private static readonly System.Text.RegularExpressions.Regex FreeIdentifierRegex =
+        new(@"(?<![\w.])([A-Za-z_][A-Za-z0-9_]*)",
+            System.Text.RegularExpressions.RegexOptions.Compiled);
+
+    private static IEnumerable<string> ExtractFreeIdentifiers(string expr)
+    {
+        // String-Literale ausblenden, damit "foo" darin nicht als Identifier zählt.
+        string noStrings = System.Text.RegularExpressions.Regex.Replace(
+            expr, @"'([^'\\]|\\.)*'|""([^""\\]|\\.)*""", "\"\"");
+        foreach (System.Text.RegularExpressions.Match m in FreeIdentifierRegex.Matches(noStrings))
+        {
+            string id = m.Groups[1].Value;
+            if (!NonParameterIdentifiers.Contains(id)) yield return id;
+        }
+    }
+
+    // ---- Block-Emit --------------------------------------------------------
+
+    /// <summary>Emittiert einen Statement-Block mit Sonderregeln für Ren'Py-
+    /// Compiler-Artefakte:
+    /// <list type="bullet">
+    ///   <item><b>Auto-Sync-Label nach Call</b>: der Ren'Py-Compiler fügt nach
+    ///     jedem <c>call X</c> intern ein <c>Label(_call_X)</c> mit einem
+    ///     <c>Pass</c>-Kind ein — die Rücksprungadresse. Im Original-.rpy steht
+    ///     das nicht. Wir überspringen es beim Emittieren.</item>
+    ///   <item><b>Init-Vereinfachung</b>: ein <c>Init(prio=0, [Define/Default])</c>
+    ///     wird als nacktes <c>define …</c>/<c>default …</c> ohne Wrapper
+    ///     ausgegeben (spart pro define einen ganzen init-Block).</item>
+    /// </list></summary>
+    private int EmitBlock(StringBuilder sb, IEnumerable statements, int indent)
+    {
+        var list = statements as IList<object?> ?? statements.Cast<object?>().ToList();
+        int emitted = 0;
+        for (int i = 0; i < list.Count; i++)
+        {
+            var stmt = list[i];
+            if (stmt is not ClassDict node)
+            {
+                if (stmt is not null)
+                    AppendIndented(sb, indent, $"# <unbekannt: {stmt.GetType().Name}>");
+                continue;
+            }
+
+            // Init(0, [einzelnes Define/Default]) → nacktes Statement
+            if (node.ClassName == "renpy.ast.Init" && TryUnwrapSingletonInit(node, out var single))
+            {
+                EmitNode(sb, single, indent);
+                emitted++;
+                continue;
+            }
+
+            // Aufeinanderfolgende TranslateString-Nodes derselben Sprache in
+            // einen gemeinsamen "translate LANG strings:"-Block zusammenfassen.
+            // Ren'Py's Compiler wrappt jeden old/new-Paar in eine eigene Node,
+            // aber die User-Syntax hat sie unter einem Block.
+            if (node.ClassName == "renpy.ast.TranslateString")
+            {
+                string lang = AsString(node.GetValueOrDefault("language"));
+                if (string.IsNullOrEmpty(lang)) lang = "None";
+                AppendIndented(sb, indent, $"translate {lang} strings:");
+                EmitTranslateStringEntry(sb, node, indent + 1);
+                // Konsekutive TranslateStrings derselben Sprache mit-emittieren
+                while (i + 1 < list.Count && list[i + 1] is ClassDict tsNext
+                       && tsNext.ClassName == "renpy.ast.TranslateString"
+                       && AsString(tsNext.GetValueOrDefault("language")) == lang)
+                {
+                    i++;
+                    EmitTranslateStringEntry(sb, tsNext, indent + 1);
+                }
+                emitted++;
+                continue;
+            }
+
+            // Scene/Show/Hide + With → in einer Zeile emittieren:
+            // `scene X with fade` statt `scene X\nwith fade`. Der With-Node
+            // ist ein Compiler-Artefakt der user-syntax `scene X with fade`.
+            if ((node.ClassName is "renpy.ast.Scene" or "renpy.ast.Show" or "renpy.ast.Hide")
+                && i + 1 < list.Count
+                && list[i + 1] is ClassDict maybeWith
+                && maybeWith.ClassName == "renpy.ast.With")
+            {
+                var withExpr = maybeWith.GetValueOrDefault("expr")
+                    ?? maybeWith.GetValueOrDefault("expression");
+                string withTrans = AsString(withExpr);
+                // Nur mergen wenn transition non-empty und nicht None.
+                if (!string.IsNullOrEmpty(withTrans) && withTrans != "None")
+                {
+                    string keyword = node.ClassName switch
+                    {
+                        "renpy.ast.Scene" => "scene",
+                        "renpy.ast.Show" => "show",
+                        _ => "hide",
+                    };
+                    EmitShowHideScene(sb, node, indent, keyword, withTrans);
+                    i++; // With-Node konsumieren
+                    emitted++;
+                    continue;
+                }
+            }
+
+            // Label + Menu → `menu name:` (spart `label X:\n  pass\n  menu:`).
+            // Ren'Py-Compiler generiert fuer `menu X:` intern ein Label(X)
+            // gefolgt von einem Menu-Node — kombinieren wir hier wieder.
+            // Der Label-Body muss leer sein (sonst waere es kein Menu-Preamble).
+            if (node.ClassName == "renpy.ast.Label"
+                && i + 1 < list.Count
+                && list[i + 1] is ClassDict maybeMenu
+                && maybeMenu.ClassName == "renpy.ast.Menu")
+            {
+                var labelBlock = node.GetValueOrDefault("block") as IEnumerable;
+                bool labelEmpty = labelBlock is null || !labelBlock.Cast<object?>().Any();
+                if (labelEmpty)
+                {
+                    string menuName = AsString(node.GetValueOrDefault("name")
+                        ?? node.GetValueOrDefault("_name"));
+                    EmitMenu(sb, maybeMenu, indent, namedAs: menuName);
+                    i++; // Menu-Node konsumieren
+                    emitted++;
+                    continue;
+                }
+            }
+
+            // Nach Call: Auto-Sync-Sequenz behandeln. Ren'Py-Compiler fuegt
+            // hinter jedem `call X` intern ein `Label(_call_X_N)` mit `Pass`
+            // als Return-Adresse ein. Wir EMITTIEREN das jetzt IMMER als
+            // `from _call_X_N`-Suffix — auch fuer den ersten Call.
+            //
+            // Warum immer explizit? Ren'Py 8.5+ generiert beim Re-Kompilieren
+            // konsistente Auto-Namen (_call_X_1, _call_X_2, …). Wenn wir das
+            // erste weg-schlucken (`_call_X` ohne Suffix), setzt Ren'Py bei
+            // dem Call einen impliziten `_call_X_1`-Sync-Label. Beim
+            // zweiten Call haben wir aber schon `from _call_X_1` explizit
+            // emittiert → Duplicate-Label-Error (Interview Desires 0.23,
+            // v0.12.8-Bug).
+            //
+            // Ausnahme: das direkte `_call_<target>`-Label (exact match,
+            // ohne _N-Suffix) — das ist der Auto-Sync fuer den ERSTEN Call
+            // an ein Target UND wird von Ren'Py 8.4 und aelter generiert.
+            // Wenn wir das mit `from _call_<target>` emittieren, ist der
+            // Name identisch → kein Konflikt.
+            string? fromClause = null;
+            if (node.ClassName == "renpy.ast.Call" && i + 1 < list.Count &&
+                list[i + 1] is ClassDict maybeLabel && maybeLabel.ClassName == "renpy.ast.Label")
+            {
+                string labelName = AsString(maybeLabel.GetValueOrDefault("name")
+                    ?? maybeLabel.GetValueOrDefault("_name"));
+                string target = GetCallTarget(node);
+                if (labelName == $"_call_{target}")
+                {
+                    fromClause = labelName; // explizit als `from _call_<target>`
+                    i++;
+                    if (i + 1 < list.Count && list[i + 1] is ClassDict p1
+                        && p1.ClassName == "renpy.ast.Pass") i++;
+                }
+                else if (labelName.StartsWith("_call_", StringComparison.Ordinal))
+                {
+                    fromClause = labelName;
+                    i++;
+                    if (i + 1 < list.Count && list[i + 1] is ClassDict p2
+                        && p2.ClassName == "renpy.ast.Pass") i++;
+                }
+            }
+
+            EmitNode(sb, node, indent, fromClause);
+            if (!IsUnsupported(node)) emitted++;
+        }
+        return emitted;
+    }
+
+    /// <summary>Emittiert einen Block und garantiert, dass er nicht leer ist —
+    /// wenn keine echten Statements dabei sind (nur Kommentare oder gar nichts),
+    /// wird ein <c>pass</c> ergänzt, damit Ren'Py den Block akzeptiert.
+    /// Sonst würde der Ren'Py-Parser mit "init statement expects a non-empty
+    /// block" abbrechen.</summary>
+    private void EmitBlockNonEmpty(StringBuilder sb, IEnumerable statements, int indent)
+    {
+        int emitted = EmitBlock(sb, statements, indent);
+        if (emitted == 0) AppendIndented(sb, indent, "pass");
+    }
+
+    private static readonly HashSet<string> KnownNodeClasses = new(StringComparer.Ordinal)
+    {
+        "renpy.ast.Label", "renpy.ast.Say", "renpy.ast.Menu", "renpy.ast.If",
+        "renpy.ast.Jump", "renpy.ast.Call", "renpy.ast.Return", "renpy.ast.Show",
+        "renpy.ast.Scene", "renpy.ast.Hide", "renpy.ast.With", "renpy.ast.Python",
+        "renpy.ast.EarlyPython", "renpy.ast.Init", "renpy.ast.Pass",
+        "renpy.ast.Define", "renpy.ast.Default", "renpy.ast.UserStatement",
+        "renpy.ast.Image", "renpy.ast.Screen", "renpy.ast.Style",
+        "renpy.ast.Transform",
+        "renpy.ast.Translate", "renpy.ast.EndTranslate",
+        "renpy.ast.TranslateString", "renpy.ast.TranslateBlock",
+        "renpy.ast.TranslatePython", "renpy.ast.TranslateEarlyBlock",
+    };
+
+    private static bool IsUnsupported(ClassDict node) => !KnownNodeClasses.Contains(node.ClassName);
+
+    /// <summary>Prueft ob ein <c>Init(N, [single-statement])</c>-Wrapper
+    /// weggelassen werden kann — Ren'Py-Compiler wraps viele Top-Level-
+    /// Statements (image/screen/style/transform/define/default) implizit
+    /// in Init-Bloecke mit den jeweiligen Default-Prioritaeten. Der User
+    /// hat sie nackt geschrieben.
+    ///
+    /// Default-Prioritaeten:
+    /// <list type="bullet">
+    ///   <item><c>image</c> → 500</item>
+    ///   <item><c>screen/style/transform/define/default</c> → 0</item>
+    /// </list>
+    /// Bei anderen Prioritaeten wird der Init-Wrap beibehalten, aber ggf.
+    /// die kompakte Prefix-Form emittiert (siehe <see cref="EmitInit"/>).</summary>
+    private static bool TryUnwrapSingletonInit(ClassDict init, out ClassDict child)
+    {
+        child = null!;
+        int prio = init.GetValueOrDefault("priority") is int p ? p : 0;
+        if (init.GetValueOrDefault("block") is not IEnumerable block) return false;
+        var kids = block.Cast<object?>().ToList();
+        if (kids.Count != 1) return false;
+        if (kids[0] is not ClassDict k) return false;
+        // Nur unwrappen wenn Prio dem impliziten Ren'Py-Default entspricht.
+        bool defaultForType = k.ClassName switch
+        {
+            "renpy.ast.Image" => prio == 500,
+            "renpy.ast.Screen" or "renpy.ast.Style" or "renpy.ast.Transform"
+                or "renpy.ast.Define" or "renpy.ast.Default" => prio == 0,
+            _ => false,
+        };
+        if (!defaultForType) return false;
+        child = k;
+        return true;
+    }
+
+    private static bool IsCallSyncLabel(ClassDict node, string callTarget)
+    {
+        if (node.ClassName != "renpy.ast.Label") return false;
+        string labelName = AsString(node.GetValueOrDefault("name") ?? node.GetValueOrDefault("_name"));
+        return labelName == $"_call_{callTarget}";
+    }
+
+    private static string GetCallTarget(ClassDict callNode) =>
+        AsString(callNode.GetValueOrDefault("label"));
+
+    private void EmitNode(StringBuilder sb, ClassDict node, int indent, string? fromLabel = null)
+    {
+        switch (node.ClassName)
+        {
+            case "renpy.ast.Label": EmitLabel(sb, node, indent); break;
+            case "renpy.ast.Say": EmitSay(sb, node, indent); break;
+            case "renpy.ast.Menu": EmitMenu(sb, node, indent); break;
+            case "renpy.ast.If": EmitIf(sb, node, indent); break;
+            case "renpy.ast.Jump": EmitJump(sb, node, indent); break;
+            case "renpy.ast.Call": EmitCall(sb, node, indent, fromLabel); break;
+            case "renpy.ast.Return": EmitReturn(sb, node, indent); break;
+            case "renpy.ast.Show": EmitShowHideScene(sb, node, indent, "show"); break;
+            case "renpy.ast.Scene": EmitShowHideScene(sb, node, indent, "scene"); break;
+            case "renpy.ast.Hide": EmitShowHideScene(sb, node, indent, "hide"); break;
+            case "renpy.ast.With": EmitWith(sb, node, indent); break;
+            case "renpy.ast.Python": EmitPython(sb, node, indent, early: false); break;
+            case "renpy.ast.EarlyPython": EmitPython(sb, node, indent, early: true); break;
+            case "renpy.ast.Init": EmitInit(sb, node, indent); break;
+            case "renpy.ast.Pass": AppendIndented(sb, indent, "pass"); break;
+            case "renpy.ast.Define": EmitDefine(sb, node, indent, "define"); break;
+            case "renpy.ast.Default": EmitDefine(sb, node, indent, "default"); break;
+            case "renpy.ast.UserStatement": EmitUserStatement(sb, node, indent); break;
+            case "renpy.ast.Image": EmitImage(sb, node, indent); break;
+            case "renpy.ast.Screen": RenpySlWriter.EmitScreen(sb, node, indent); break;
+            case "renpy.ast.Style": EmitStyle(sb, node, indent); break;
+            case "renpy.ast.Transform": EmitTransform(sb, node, indent); break;
+            case "renpy.ast.Translate": EmitTranslate(sb, node, indent); break;
+            case "renpy.ast.EndTranslate": /* Marker, wird beim Emit übersprungen */ break;
+            case "renpy.ast.TranslateString":
+                // Wird niemals einzeln emittiert — der Block-Emit gruppiert
+                // aufeinanderfolgende TranslateStrings in einen strings-Block.
+                // Falls doch (fehlerhafter Input), als Kommentar durchlassen.
+                AppendIndented(sb, indent, "# <renpy.ast.TranslateString ohne umschließenden strings-Block>");
+                break;
+            case "renpy.ast.TranslateBlock": EmitTranslateBlock(sb, node, indent); break;
+            case "renpy.ast.TranslatePython": EmitTranslatePython(sb, node, indent); break;
+            case "renpy.ast.TranslateEarlyBlock": EmitTranslateBlock(sb, node, indent, early: true); break;
+            default:
+                AppendIndented(sb, indent, $"# <unsupported: {node.ClassName}>");
+                break;
+        }
+    }
+
+    // ---- Node-spezifische Writer -------------------------------------------
+
+    private void EmitLabel(StringBuilder sb, ClassDict node, int indent)
+    {
+        string name = AsString(node.GetValueOrDefault("name") ?? node.GetValueOrDefault("_name"));
+        string parameters = FormatParameterInfo(node.GetValueOrDefault("parameters"));
+        AppendIndented(sb, indent, $"label {name}{parameters}:");
+        EmitBlockNonEmpty(sb, node.GetValueOrDefault("block") as IEnumerable ?? Array.Empty<object>(), indent + 1);
+    }
+
+    /// <summary>Formatiert einen Parameter-Info-Node in seine
+    /// <c>(name, name2=default, …)</c>-Deklarationsform fuer <c>label</c>-
+    /// und <c>screen</c>-Definitionen.
+    ///
+    /// Unterstuetzt zwei Ren'Py-Versionen:
+    /// <list type="bullet">
+    ///   <item>Alt (<c>renpy.ast.ParameterInfo</c>): <c>parameters =
+    ///     [(name, default?), …]</c> als Liste von Tupeln.</item>
+    ///   <item>Neu (<c>renpy.parameter.Signature</c>, ab Ren'Py 8.5):
+    ///     <c>parameters</c> ist ein OrderedDict/Dict mit Namen als Keys
+    ///     und <c>Parameter</c>-Objekten (mit <c>kind</c>/<c>default</c>)
+    ///     als Values. Verifiziert an Interview Desires 0.23 wo alter
+    ///     Parser den <c>label try_unlock_truth(unlocked_list, index):</c>
+    ///     ohne Parameter emittiert hat → NameError zur Laufzeit.</item>
+    /// </list></summary>
+    private static string FormatParameterInfo(object? parameters)
+    {
+        if (parameters is not ClassDict cd) return "";
+        var inner = cd.GetValueOrDefault("parameters");
+        var parts = new List<string>();
+
+        // Neues Format: parameters ist ein Dict (OrderedDict) mit
+        // {name: Parameter-Object}.
+        if (inner is System.Collections.IDictionary dict)
+        {
+            foreach (System.Collections.DictionaryEntry e in dict)
+            {
+                string pname = AsString(e.Key);
+                if (string.IsNullOrEmpty(pname)) continue;
+                object? defaultVal = null;
+                if (e.Value is ClassDict param)
+                    defaultVal = param.GetValueOrDefault("default");
+                if (defaultVal is not null)
+                    parts.Add($"{pname}={AsString(defaultVal)}");
+                else
+                    parts.Add(pname);
+            }
+        }
+        // Altes Format: parameters ist eine List von 2-Tupeln [(name, default), …].
+        else if (inner is IEnumerable list)
+        {
+            foreach (var p in list)
+            {
+                if (p is not object[] arr || arr.Length < 1) continue;
+                string pname = AsString(arr[0]);
+                if (string.IsNullOrEmpty(pname)) continue;
+                if (arr.Length >= 2 && arr[1] is not null)
+                    parts.Add($"{pname}={AsString(arr[1])}");
+                else
+                    parts.Add(pname);
+            }
+        }
+        return parts.Count > 0 ? "(" + string.Join(", ", parts) + ")" : "";
+    }
+
+    private static void EmitSay(StringBuilder sb, ClassDict node, int indent)
+    {
+        string what = AsString(node.GetValueOrDefault("what"));
+        object? who = node.GetValueOrDefault("who");
+        string whoText = who is null ? "" : AsString(who);
+        string line = string.IsNullOrEmpty(whoText)
+            ? $"\"{EscapeString(what)}\""
+            : $"{whoText} \"{EscapeString(what)}\"";
+        AppendIndented(sb, indent, line);
+    }
+
+    private void EmitMenu(StringBuilder sb, ClassDict node, int indent, string? namedAs = null)
+    {
+        // Menu-Header: `menu:`, `menu name:`, `menu name(box_yalign=0.5):` oder
+        // `menu (arg=x):`. Menu-Level-arguments kommen aus dem `arguments`-
+        // Feld am Menu-Node selbst (nicht per Item).
+        string menuArgs = FormatArgumentInfo(node.GetValueOrDefault("arguments"));
+        string head = string.IsNullOrEmpty(namedAs) ? "menu" : $"menu {namedAs}";
+        if (!string.IsNullOrEmpty(menuArgs)) head += menuArgs;
+        AppendIndented(sb, indent, head + ":");
+
+        if (node.GetValueOrDefault("items") is not IEnumerable items) return;
+
+        // Ren'Py-Neuere-Versionen (8.x): parallele Liste `item_arguments`
+        // mit ArgumentInfo pro Item (fuer `"text"(wt=…, disabled=…):`).
+        // Aeltere Versionen haben das Feld nicht → alle Items ohne Args.
+        var itemArgs = (node.GetValueOrDefault("item_arguments") as IEnumerable)?
+            .Cast<object?>().ToList() ?? new List<object?>();
+
+        int itemIdx = 0;
+        foreach (var it in items)
+        {
+            // Menu-Item ist ein Tupel (caption, condition, block) — in neueren
+            // Ren'Py-Versionen manchmal 4-Tupel mit inline arguments.
+            if (it is not object[] arr || arr.Length < 3) { itemIdx++; continue; }
+            string caption = AsString(arr[0]);
+            string condition = AsString(arr[1]);
+            string argsText = "";
+            if (itemIdx < itemArgs.Count) argsText = FormatArgumentInfo(itemArgs[itemIdx]);
+            else if (arr.Length >= 4) argsText = FormatArgumentInfo(arr[3]);
+            string suffix = condition is "True" or "" ? "" : $" if {condition}";
+            AppendIndented(sb, indent + 1, $"\"{EscapeString(caption)}\"{argsText}{suffix}:");
+            EmitBlockNonEmpty(sb, arr[2] as IEnumerable ?? Array.Empty<object>(), indent + 2);
+            itemIdx++;
+        }
+    }
+
+    private void EmitIf(StringBuilder sb, ClassDict node, int indent)
+    {
+        if (node.GetValueOrDefault("entries") is not IEnumerable entries) return;
+        bool first = true;
+        foreach (var e in entries)
+        {
+            if (e is not object[] arr || arr.Length < 2) continue;
+            string cond = AsString(arr[0]);
+            string head = first
+                ? $"if {cond}:"
+                : cond is "True" or "" ? "else:" : $"elif {cond}:";
+            AppendIndented(sb, indent, head);
+            EmitBlockNonEmpty(sb, arr[1] as IEnumerable ?? Array.Empty<object>(), indent + 1);
+            first = false;
+        }
+    }
+
+    private static void EmitJump(StringBuilder sb, ClassDict node, int indent)
+    {
+        string target = AsString(node.GetValueOrDefault("target"));
+        bool expr = node.GetValueOrDefault("expression") is bool b && b;
+        AppendIndented(sb, indent, expr ? $"jump expression {target}" : $"jump {target}");
+    }
+
+    private static void EmitCall(StringBuilder sb, ClassDict node, int indent, string? fromLabel = null)
+    {
+        string target = AsString(node.GetValueOrDefault("label"));
+        bool expr = node.GetValueOrDefault("expression") is bool b && b;
+        string args = FormatArgumentInfo(node.GetValueOrDefault("arguments"));
+        string head = expr ? $"call expression {target}" : $"call {target}";
+        if (!string.IsNullOrEmpty(args)) head += " " + args;
+        if (!string.IsNullOrEmpty(fromLabel)) head += $" from {fromLabel}";
+        AppendIndented(sb, indent, head);
+    }
+
+    /// <summary>Formatiert ein <c>renpy.ast.ArgumentInfo</c>-Node in seine
+    /// <c>(arg1, kw=arg2, …)</c>-Textform. Wird von <see cref="EmitCall"/>
+    /// gebraucht: ohne die Args wuerde <c>call unlock("x") from _foo</c>
+    /// als <c>call unlock from _foo</c> emittiert, und der aufgerufene
+    /// <c>label unlock(label_name)</c>-Parameter bekommt keinen Wert →
+    /// <c>NameError: name 'label_name' is not defined</c> zur Laufzeit
+    /// (verifiziert an Sophia Parker 0.230, v0.8.4-Bug).
+    ///
+    /// Struktur: <c>ArgumentInfo.arguments = [(name?, PyExpr), …]</c> —
+    /// wenn <c>name</c> None ist, ist es positional; sonst Keyword-Arg.</summary>
+    private static string FormatArgumentInfo(object? arguments)
+    {
+        if (arguments is not ClassDict cd) return "";
+        if (cd.GetValueOrDefault("arguments") is not IEnumerable list) return "";
+        var parts = new List<string>();
+        foreach (var a in list)
+        {
+            if (a is not object[] arr || arr.Length < 2) continue;
+            string aname = arr[0] is null ? "" : AsString(arr[0]);
+            string aval = AsString(arr[1]);
+            parts.Add(string.IsNullOrEmpty(aname) ? aval : $"{aname}={aval}");
+        }
+        return parts.Count > 0 ? "(" + string.Join(", ", parts) + ")" : "";
+    }
+
+    private static void EmitReturn(StringBuilder sb, ClassDict node, int indent)
+    {
+        var expr = node.GetValueOrDefault("expression");
+        string suffix = expr is null ? "" : " " + AsString(expr);
+        AppendIndented(sb, indent, $"return{suffix}");
+    }
+
+    /// <summary>Emittiert show/scene/hide-Statements. Die Imspec-Struktur ist
+    /// ein Tupel mit variabler Länge:
+    /// <c>(name-tuple, expression, tag, at_list, layer, zorder, behind)</c>.
+    /// Neuere Ren'Py-Versionen können zusätzliche Felder haben — wir lesen nur
+    /// die, die vorhanden sind.
+    ///
+    /// Wichtige Sonderfälle:
+    /// <list type="bullet">
+    ///   <item><c>expression</c> ist gesetzt → <c>scene expression &lt;expr&gt;</c>
+    ///     (Python-Ausdruck statt festem Bild-Namen, z. B.
+    ///     <c>renpy.random.choice([...])</c>). Sonst hätte Ren'Py mit
+    ///     "end of line expected" abgebrochen.</item>
+    ///   <item><c>tag</c> → <c>as TAG</c></item>
+    ///   <item><c>at_list</c> → <c>at TRANSFORM[, …]</c></item>
+    ///   <item><c>behind</c> → <c>behind TAG[, …]</c></item>
+    ///   <item><c>layer</c> (non-Default "master") → <c>onlayer LAYER</c></item>
+    ///   <item><c>zorder</c> → <c>zorder N</c></item>
+    ///   <item><c>atl</c> auf dem Node → Body mit ATL-Block</item>
+    /// </list></summary>
+    private static void EmitShowHideScene(StringBuilder sb, ClassDict node, int indent, string keyword,
+        string? withTransition = null)
+    {
+        var imspec = node.GetValueOrDefault("imspec") as object[];
+        var parts = new List<string> { keyword };
+
+        object? name = null, expression = null, tag = null, atList = null,
+            layer = null, zorder = null, behind = null;
+        if (imspec is not null)
+        {
+            if (imspec.Length > 0) name = imspec[0];
+            if (imspec.Length > 1) expression = imspec[1];
+            if (imspec.Length > 2) tag = imspec[2];
+            if (imspec.Length > 3) atList = imspec[3];
+            if (imspec.Length > 4) layer = imspec[4];
+            if (imspec.Length > 5) zorder = imspec[5];
+            if (imspec.Length > 6) behind = imspec[6];
+        }
+
+        string exprText = expression is null ? "" : AsString(expression);
+        if (!string.IsNullOrEmpty(exprText) && exprText != "None")
+        {
+            parts.Add("expression");
+            parts.Add(exprText);
+        }
+        else if (name is IEnumerable nameParts && name is not string)
+        {
+            var tags = nameParts.Cast<object?>().Select(AsString)
+                .Where(s => !string.IsNullOrEmpty(s)).ToList();
+            if (tags.Count > 0) parts.Add(string.Join(" ", tags));
+        }
+        else if (name is not null)
+        {
+            parts.Add(AsString(name));
+        }
+
+        if (tag is string tagStr && !string.IsNullOrEmpty(tagStr))
+        {
+            parts.Add("as");
+            parts.Add(tagStr);
+        }
+
+        if (atList is IEnumerable atls)
+        {
+            var items = atls.Cast<object?>().Select(AsString)
+                .Where(s => !string.IsNullOrEmpty(s)).ToList();
+            if (items.Count > 0)
+            {
+                parts.Add("at");
+                parts.Add(string.Join(", ", items));
+            }
+        }
+
+        if (behind is IEnumerable behinds)
+        {
+            var items = behinds.Cast<object?>().Select(AsString)
+                .Where(s => !string.IsNullOrEmpty(s)).ToList();
+            if (items.Count > 0)
+            {
+                parts.Add("behind");
+                parts.Add(string.Join(", ", items));
+            }
+        }
+
+        if (layer is string layStr && !string.IsNullOrEmpty(layStr) && layStr != "master")
+        {
+            parts.Add("onlayer");
+            parts.Add(layStr);
+        }
+
+        string zorderText = AsString(zorder);
+        if (!string.IsNullOrEmpty(zorderText) && zorderText != "0" && zorderText != "None")
+        {
+            parts.Add("zorder");
+            parts.Add(zorderText);
+        }
+
+        // With-Transition (aus Peek-Ahead in EmitBlock zusammengefuehrt):
+        // `scene X with fade` statt `scene X\nwith fade`. Wird VOR dem `:`
+        // eingefuegt, aber nur wenn kein ATL-Body dranhaengt (ATL kollidiert
+        // mit `with` in derselben Zeile syntaktisch).
+        var atl = node.GetValueOrDefault("atl");
+        bool hasAtl = atl is ClassDict atlBlock1 && atlBlock1.ClassName == "renpy.atl.RawBlock";
+        if (!string.IsNullOrEmpty(withTransition) && !hasAtl)
+        {
+            parts.Add("with");
+            parts.Add(withTransition);
+        }
+
+        if (hasAtl)
+        {
+            AppendIndented(sb, indent, string.Join(" ", parts) + ":");
+            RenpyAtlWriter.EmitBlockBody(sb, (ClassDict)atl!, indent + 1);
+        }
+        else
+        {
+            AppendIndented(sb, indent, string.Join(" ", parts));
+        }
+    }
+
+    private static void EmitWith(StringBuilder sb, ClassDict node, int indent)
+    {
+        var expr = node.GetValueOrDefault("expr") ?? node.GetValueOrDefault("expression");
+        AppendIndented(sb, indent, $"with {AsString(expr)}");
+    }
+
+    private static void EmitPython(StringBuilder sb, ClassDict node, int indent, bool early)
+    {
+        string code = AsString(node.GetValueOrDefault("code"));
+        bool hide = node.GetValueOrDefault("hide") is bool h && h;
+        bool store = node.GetValueOrDefault("store") is string s && s != "store";
+
+        // Optionale hide/store-Modifier bauen die Header-Zeile mit — Reihenfolge:
+        // `python [early] [hide] [in <store>]:`. Der $-Shortcut existiert NUR
+        // für das einfache Python-Statement — nicht für early/hide/in.
+        bool needsBlockForm = early || hide || store;
+
+        if (!code.Contains('\n') && !needsBlockForm)
+        {
+            AppendIndented(sb, indent, $"$ {code}");
+            return;
+        }
+
+        var header = new System.Text.StringBuilder("python");
+        if (early) header.Append(" early");
+        if (hide) header.Append(" hide");
+        if (node.GetValueOrDefault("store") is string ns && !string.IsNullOrEmpty(ns) && ns != "store")
+            header.Append(" in ").Append(ns);
+        header.Append(':');
+        AppendIndented(sb, indent, header.ToString());
+
+        int lineCount = 0;
+        foreach (var line in code.Split('\n'))
+        {
+            AppendIndented(sb, indent + 1, line);
+            lineCount++;
+        }
+        // Ren'Py erwartet einen non-empty Block — leerer Python-Body kracht.
+        if (lineCount == 0 || (lineCount == 1 && string.IsNullOrWhiteSpace(code)))
+            AppendIndented(sb, indent + 1, "pass");
+    }
+
+    private void EmitInit(StringBuilder sb, ClassDict node, int indent)
+    {
+        int priority = node.GetValueOrDefault("priority") is int p ? p : 0;
+        var block = node.GetValueOrDefault("block") as IEnumerable ?? Array.Empty<object>();
+
+        // `init N`-Prefix nur wenn priority != _defaultInitOffset.
+        // Bei match haben wir schon `init offset = N` am Top emittiert —
+        // der Init-Wrapper waere redundant.
+        int effectivePriority = priority - _defaultInitOffset;
+        // Aber: `init 0` schreibt niemand — die default-Priority (0) laesst
+        // Ren'Py sowieso weg. Wir also EBENSO wenn effectivePriority == 0.
+        string prioText = effectivePriority == 0 ? "" : $"{effectivePriority} ";
+
+        // Modern-Kompakt-Form: `init N python:` statt `init N:\n  python:`.
+        // Voraussetzung: Block enthaelt genau EIN Python-Statement ohne
+        // hide/store-Modifier (die brauchen den Block-Header sowieso).
+        var kids = block.Cast<object?>().ToList();
+        if (kids.Count == 1 && kids[0] is ClassDict py
+            && py.ClassName is "renpy.ast.Python" or "renpy.ast.EarlyPython")
+        {
+            bool early = py.ClassName == "renpy.ast.EarlyPython";
+            bool hide = py.GetValueOrDefault("hide") is bool h && h;
+            string store = py.GetValueOrDefault("store") as string ?? "store";
+            if (!early && !hide && store == "store")
+            {
+                string code = AsString(py.GetValueOrDefault("code"));
+                AppendIndented(sb, indent, $"init {prioText}python:".Replace("  ", " "));
+                foreach (var line in code.Split('\n'))
+                    AppendIndented(sb, indent + 1, line);
+                return;
+            }
+        }
+
+        // Bei effektiv-0 UND single-child Screen/Style/Transform: einfach
+        // den child emittieren (Init-Wrapper ganz weg).
+        if (effectivePriority == 0 && kids.Count == 1 && kids[0] is ClassDict directChild
+            && directChild.ClassName is "renpy.ast.Screen" or "renpy.ast.Style" or "renpy.ast.Transform")
+        {
+            EmitNode(sb, directChild, indent);
+            return;
+        }
+
+        // Modern-Kompakt-Form auch fuer Screen/Style/Transform bei non-default
+        // Prio: `init -500 screen X:` statt `init -500:\n  screen X:`.
+        if (kids.Count == 1 && kids[0] is ClassDict single)
+        {
+            string? keyword = single.ClassName switch
+            {
+                "renpy.ast.Screen" => "screen",
+                "renpy.ast.Style" => "style",
+                "renpy.ast.Transform" => "transform",
+                _ => null,
+            };
+            if (keyword is not null)
+            {
+                var childOut = new StringBuilder();
+                EmitNode(childOut, single, indent);
+                var childText = childOut.ToString();
+                int nl = childText.IndexOf('\n');
+                if (nl > 0)
+                {
+                    string first = childText[..nl].TrimStart();
+                    string rest = childText[nl..];
+                    for (int i = 0; i < indent; i++) sb.Append(Indent);
+                    sb.Append($"init {prioText}").Append(first).Append(rest);
+                    return;
+                }
+            }
+        }
+
+        AppendIndented(sb, indent, $"init {prioText}:".Replace(" :", ":"));
+        EmitBlockNonEmpty(sb, block, indent + 1);
+    }
+
+    /// <summary>Emittiert <c>define</c>/<c>default</c>-Statements inklusive
+    /// Store-Prefix. Wichtig: Der Ren'Py-Compiler speichert im <c>store</c>-Feld
+    /// die volle Store-Bezeichnung — z. B. <c>"store"</c> (Default) oder
+    /// <c>"store.gui"</c>. Im Original-.rpy schreibt der User <c>define gui.foo</c>,
+    /// nicht <c>define foo</c>; wenn wir den Store-Prefix vergessen, landet die
+    /// Variable im falschen Namespace und spätere <c>gui.foo</c>-Zugriffe werfen
+    /// <c>AttributeError: 'StoreModule' object has no attribute 'foo'</c>.</summary>
+    private static void EmitDefine(StringBuilder sb, ClassDict node, int indent, string keyword)
+    {
+        string varname = AsString(node.GetValueOrDefault("varname") ?? node.GetValueOrDefault("name"));
+        string store = AsString(node.GetValueOrDefault("store"));
+        string code = AsString(node.GetValueOrDefault("code"));
+        string op = AsString(node.GetValueOrDefault("operator")); // "=", "+=", …
+        if (string.IsNullOrEmpty(op)) op = "=";
+
+        // "store"        → nur varname
+        // "store.gui"    → gui.varname
+        // "store.config" → config.varname
+        string qualified = varname;
+        if (!string.IsNullOrEmpty(store) && store != "store")
+        {
+            string prefix = store.StartsWith("store.", StringComparison.Ordinal)
+                ? store[6..] : store;
+            qualified = $"{prefix}.{varname}";
+        }
+
+        // Optional: Index-Zuweisung wie `define foo[0] = 42` — der Compiler
+        // packt den Index-Ausdruck in ein "index"-Feld.
+        var index = node.GetValueOrDefault("index");
+        if (index is not null && AsString(index) is { Length: > 0 } idxStr && idxStr != "None")
+            qualified += $"[{idxStr}]";
+
+        AppendIndented(sb, indent, $"{keyword} {qualified} {op} {code}".TrimEnd());
+    }
+
+    private static void EmitTranslateStringEntry(StringBuilder sb, ClassDict node, int indent)
+    {
+        string oldStr = AsString(node.GetValueOrDefault("old"));
+        string newStr = AsString(node.GetValueOrDefault("new"));
+        AppendIndented(sb, indent, $"old \"{EscapeString(oldStr)}\"");
+        AppendIndented(sb, indent, $"new \"{EscapeString(newStr)}\"");
+    }
+
+    /// <summary>Translate-Block: <c>translate LANG IDENTIFIER:</c> gefolgt von
+    /// dem eigentlichen Body (meist ein einzelnes Say). Der Ren'Py-Compiler
+    /// hängt danach automatisch einen <c>EndTranslate</c>-Marker an — den
+    /// überspringen wir im Block-Walker.</summary>
+    private void EmitTranslate(StringBuilder sb, ClassDict node, int indent)
+    {
+        string lang = AsString(node.GetValueOrDefault("language"));
+        string identifier = AsString(node.GetValueOrDefault("identifier"));
+        if (string.IsNullOrEmpty(lang)) lang = "None";
+        AppendIndented(sb, indent, $"translate {lang} {identifier}:");
+        EmitBlockNonEmpty(sb, node.GetValueOrDefault("block") as IEnumerable ?? Array.Empty<object>(), indent + 1);
+    }
+
+    /// <summary>TranslateBlock: <c>translate LANG python:</c> bzw.
+    /// <c>translate LANG:</c> mit Init/Style/… im Body.</summary>
+    private void EmitTranslateBlock(StringBuilder sb, ClassDict node, int indent, bool early = false)
+    {
+        string lang = AsString(node.GetValueOrDefault("language"));
+        if (string.IsNullOrEmpty(lang)) lang = "None";
+        string header = early ? $"translate {lang} early:" : $"translate {lang}:";
+        AppendIndented(sb, indent, header);
+        EmitBlockNonEmpty(sb, node.GetValueOrDefault("block") as IEnumerable ?? Array.Empty<object>(), indent + 1);
+    }
+
+    /// <summary>TranslatePython: <c>translate LANG python:</c> mit Python-Code.</summary>
+    private static void EmitTranslatePython(StringBuilder sb, ClassDict node, int indent)
+    {
+        string lang = AsString(node.GetValueOrDefault("language"));
+        if (string.IsNullOrEmpty(lang)) lang = "None";
+        string code = AsString(node.GetValueOrDefault("code"));
+        AppendIndented(sb, indent, $"translate {lang} python:");
+        if (string.IsNullOrWhiteSpace(code))
+            AppendIndented(sb, indent + 1, "pass");
+        else
+            foreach (var line in code.Split('\n'))
+                AppendIndented(sb, indent + 1, line);
+    }
+
+    /// <summary>Transform-Deklaration auf Top-Level: <c>transform NAME:</c>
+    /// gefolgt von einem ATL-Block. Wie ein Named-Image-mit-ATL, nur
+    /// wiederverwendbar per <c>at NAME</c> auf beliebigen Displayables.
+    ///
+    /// Sonderfall: Ren'Py speichert die Transform-Parameter nicht in der
+    /// .rpyc. Wir rekonstruieren aus den Aufrufern die Anzahl und aus dem
+    /// ATL-Body die Namen. Aber Achtung: <b>keinen Parameter emittieren,
+    /// wenn kein Aufrufer Argumente übergibt</b> — freie Identifier im Body
+    /// (z. B. <c>linear scroll_duration yoffset -12000</c>) sind sonst
+    /// Store-Variablen und würden durch einen fälschlich hinzugefügten
+    /// Parameter geshadowed werden (Default <c>None</c> → TypeError beim
+    /// Rendern). Nur wenn ein Aufruf tatsächlich Argumente übergibt (dann
+    /// braucht Ren'Py eine Signatur, sonst Child-Displayable-Bug), rekon-
+    /// struieren wir <c>callArgCount</c> Parameter — benannt mit den
+    /// extrahierten Namen wo verfügbar, sonst <c>_argN</c> als Fallback.
+    /// Ren'Py verbietet <c>*args</c>/<c>**kwargs</c> auf <c>transform</c>-
+    /// Statements explizit, also nur benannte Parameter mit Default
+    /// <c>None</c>.</summary>
+    private void EmitTransform(StringBuilder sb, ClassDict node, int indent)
+    {
+        string name = AsString(node.GetValueOrDefault("varname") ?? node.GetValueOrDefault("name"));
+
+        _transformCallArgCount.TryGetValue(name, out int callArgCount);
+        _transformParamNames.TryGetValue(name, out var extractedNames);
+        extractedNames ??= new List<string>();
+
+        string paramSuffix = "";
+        if (callArgCount > 0)
+        {
+            var parts = new List<string>(callArgCount);
+            for (int i = 0; i < callArgCount; i++)
+            {
+                string paramName = i < extractedNames.Count ? extractedNames[i] : $"_arg{i}";
+                parts.Add($"{paramName}=None");
+            }
+            paramSuffix = "(" + string.Join(", ", parts) + ")";
+        }
+
+        AppendIndented(sb, indent, $"transform {name}{paramSuffix}:");
+        RenpyAtlWriter.EmitBlockBody(sb, node.GetValueOrDefault("atl"), indent + 1);
+    }
+
+    private static void EmitStyle(StringBuilder sb, ClassDict node, int indent)
+    {
+        string name = AsString(node.GetValueOrDefault("style_name") ?? node.GetValueOrDefault("name"));
+        string parent = AsString(node.GetValueOrDefault("parent"));
+        bool clear = node.GetValueOrDefault("clear") is bool c && c;
+        var properties = node.GetValueOrDefault("properties") as IDictionary;
+        var delattr = node.GetValueOrDefault("delattr") as IEnumerable;
+        var take = node.GetValueOrDefault("take");
+        var variant = AsString(node.GetValueOrDefault("variant"));
+
+        string head = $"style {name}";
+        if (!string.IsNullOrEmpty(parent) && parent != "None") head += $" is {parent}";
+
+        // Erst den Body-Text sammeln, dann entscheiden ob wir überhaupt einen
+        // Doppelpunkt setzen. Ren'Py erlaubt "style X" ohne Body — dort kein
+        // "pass" einfügen, weil Ren'Py "pass" nicht als Style-Property kennt
+        // ("style property pass is not known").
+        var bodyLines = new List<string>();
+        if (clear) bodyLines.Add("clear");
+        if (take is not null && AsString(take) is { Length: > 0 } takeStr && takeStr != "None")
+            bodyLines.Add($"take {takeStr}");
+        if (!string.IsNullOrEmpty(variant) && variant != "None")
+            bodyLines.Add($"variant {variant}");
+        if (delattr is not null)
+            foreach (var d in delattr) bodyLines.Add($"del {AsString(d)}");
+        if (properties is not null)
+            foreach (DictionaryEntry de in properties)
+                bodyLines.Add($"{AsString(de.Key)} {AsString(de.Value)}");
+
+        if (bodyLines.Count == 0)
+        {
+            AppendIndented(sb, indent, head);
+            return;
+        }
+
+        AppendIndented(sb, indent, head + ":");
+        foreach (var line in bodyLines) AppendIndented(sb, indent + 1, line);
+    }
+
+    private static void EmitImage(StringBuilder sb, ClassDict node, int indent)
+    {
+        // imgname ist ein Tupel wie ("day1_wakeup",) oder ("hero", "happy").
+        var imgname = node.GetValueOrDefault("imgname");
+        string name = imgname is IEnumerable en
+            ? string.Join(" ", en.Cast<object?>().Select(AsString))
+            : AsString(imgname);
+        string code = AsString(node.GetValueOrDefault("code"));
+
+        if (!string.IsNullOrEmpty(code))
+        {
+            AppendIndented(sb, indent, $"image {name} = {code}");
+            return;
+        }
+
+        // Kein code → Ren'Py-ATL-Block-Syntax: `image name:` mit ATL-Statements
+        // im Body. Der ATL-Writer deckt die häufigen Raw*-Typen ab
+        // (Multipurpose, Time, Parallel, Choice, Block, Repeat, On, Function,
+        // Event, ContainsExpr); unbekannte Raw-Klassen werden als Kommentar
+        // mit pass emittiert.
+        AppendIndented(sb, indent, $"image {name}:");
+        RenpyAtlWriter.EmitBlockBody(sb, node.GetValueOrDefault("atl"), indent + 1);
+    }
+
+    private static void EmitUserStatement(StringBuilder sb, ClassDict node, int indent)
+    {
+        // Beliebiges Custom-Statement (z. B. "play music", "stop music", "pause").
+        // Meist steht der komplette Text im "line"-Feld.
+        string line = AsString(node.GetValueOrDefault("line") ?? node.GetValueOrDefault("parsed"));
+
+        // Spezial-Handling fuer layeredimage: der Parsed-Tupel enthaelt eine
+        // echte RawLayeredImage-Instanz mit children (Attributes/Groups/
+        // Always). Wir emittieren einen richtigen Body statt nur `pass`.
+        var trimmed = line.TrimStart();
+        bool isLayeredImage = line.TrimEnd().EndsWith(":", StringComparison.Ordinal)
+            && (trimmed.StartsWith("layeredimage ", StringComparison.Ordinal)
+                || trimmed.StartsWith("layeredimage:", StringComparison.Ordinal));
+
+        if (isLayeredImage && TryGetLayeredImageParsed(node, out var raw))
+        {
+            AppendIndented(sb, indent, line);
+            EmitLayeredImageBody(sb, raw, indent + 1);
+            return;
+        }
+
+        AppendIndented(sb, indent, line);
+
+        // Fallback wenn Parsed-Instanz nicht extrahierbar: `pass` damit
+        // Ren'Py's Parser nicht mit "expects a non-empty block" abbricht.
+        if (isLayeredImage) AppendIndented(sb, indent + 1, "pass");
+    }
+
+    /// <summary>Extrahiert die RawLayeredImage-Instanz aus dem UserStatement-
+    /// `parsed`-Feld. Struktur: <c>parsed = ("layeredimage", RawLayeredImage)</c>.</summary>
+    private static bool TryGetLayeredImageParsed(ClassDict node, out ClassDict raw)
+    {
+        raw = null!;
+        if (node.GetValueOrDefault("parsed") is not object[] parsed || parsed.Length < 2)
+            return false;
+        if (parsed[1] is not ClassDict rli) return false;
+        if (!rli.ClassName.EndsWith("RawLayeredImage", StringComparison.Ordinal))
+            return false;
+        raw = rli;
+        return true;
+    }
+
+    /// <summary>Emittiert den Body eines RawLayeredImage: erst inline die
+    /// LayeredImage-Level-Properties (image, at, etc.), dann alle Children
+    /// (RawAttribute, RawAttributeGroup, RawAlways, RawCondition...) mit
+    /// passendem Sub-Emitter. Wenn nichts extrahierbar, fallback auf `pass`.</summary>
+    private static void EmitLayeredImageBody(StringBuilder sb, ClassDict raw, int indent)
+    {
+        int emitted = 0;
+        // LayeredImage-Level-Properties als eigene Zeilen (nicht inline im
+        // Header — das waere die kompakte `layeredimage X image=...:`-Syntax,
+        // Ren'Py akzeptiert aber auch beides als Body-Statement).
+        foreach (var propLine in ExpandProperties(raw))
+        {
+            AppendIndented(sb, indent, propLine);
+            emitted++;
+        }
+        if (raw.GetValueOrDefault("children") is IEnumerable children)
+        {
+            foreach (var child in children)
+            {
+                if (child is not ClassDict cd) continue;
+                if (EmitLayeredImageChild(sb, cd, indent)) emitted++;
+            }
+        }
+        if (emitted == 0) AppendIndented(sb, indent, "pass");
+    }
+
+    private static IEnumerable<string> ExpandProperties(ClassDict cd)
+    {
+        var parts = new List<string>();
+        AppendProps(cd.GetValueOrDefault("final_properties") as System.Collections.IDictionary, parts, quoted: true);
+        AppendProps(cd.GetValueOrDefault("expr_properties") as System.Collections.IDictionary, parts, quoted: false);
+        return parts;
+    }
+
+    private static bool EmitLayeredImageChild(StringBuilder sb, ClassDict cd, int indent)
+    {
+        // Klassennamen kommen als "renpy.common.00layeredimage_ren.RawAttribute"
+        // rein — Endung matcht reicht.
+        var cn = cd.ClassName;
+        if (cn.EndsWith("RawAttribute", StringComparison.Ordinal))
+        {
+            EmitRawAttribute(sb, cd, indent);
+            return true;
+        }
+        if (cn.EndsWith("RawAttributeGroup", StringComparison.Ordinal))
+        {
+            EmitRawAttributeGroup(sb, cd, indent);
+            return true;
+        }
+        if (cn.EndsWith("RawAlways", StringComparison.Ordinal))
+        {
+            EmitRawAlways(sb, cd, indent);
+            return true;
+        }
+        // Unbekanntes Sub-Node (RawCondition, RawConditionGroup): als
+        // Kommentar durchreichen. Zumindest bricht Ren'Py nicht mehr ab.
+        AppendIndented(sb, indent, $"# <unsupported layeredimage-child: {cn}>");
+        return false;
+    }
+
+    private static void EmitRawAttribute(StringBuilder sb, ClassDict cd, int indent)
+    {
+        string name = AsString(cd.GetValueOrDefault("name"));
+        // Manche RawAttribute haben ein `group`-Feld, das im "attribute"-
+        // Kontext irrelevant ist (nur bei Gruppen). Wir ignorieren es hier.
+        var image = cd.GetValueOrDefault("image");
+        string imageText = image is null ? "" : AsString(image);
+        if (string.IsNullOrEmpty(imageText))
+        {
+            AppendIndented(sb, indent, $"attribute {name}");
+            return;
+        }
+        AppendIndented(sb, indent, $"attribute {name}:");
+        AppendIndented(sb, indent + 1, imageText);
+    }
+
+    private static void EmitRawAttributeGroup(StringBuilder sb, ClassDict cd, int indent)
+    {
+        string groupName = AsString(cd.GetValueOrDefault("group_name"));
+        // Properties inline nach dem group-Header emittieren, z.B.
+        // `group cr auto:` fuer auto-loading aus dem Image-Verzeichnis.
+        // Ohne die Properties werden die dynamisch geladenen Attribute
+        // nicht registriert → `show ada rczlzm009` scheitert an
+        // "unknown attributes".
+        string props = FormatLayeredImageProperties(cd);
+        var header = string.IsNullOrEmpty(groupName)
+            ? $"group{props}:"
+            : $"group {groupName}{props}:";
+        AppendIndented(sb, indent, header);
+        int emitted = 0;
+        if (cd.GetValueOrDefault("children") is IEnumerable subs)
+        {
+            foreach (var sub in subs)
+            {
+                if (sub is not ClassDict scd) continue;
+                if (EmitLayeredImageChild(sb, scd, indent + 1)) emitted++;
+            }
+        }
+        if (emitted == 0) AppendIndented(sb, indent + 1, "pass");
+    }
+
+    /// <summary>Emittiert die `final_properties` und `expr_properties` eines
+    /// RawLayeredImage/RawAttributeGroup/RawAttribute als Inline-Properties
+    /// (Space-separiert vorm `:`). Beispiel: `auto True variant "small"`.
+    /// Beide Dicts werden nacheinander abgearbeitet — final zuerst.</summary>
+    private static string FormatLayeredImageProperties(ClassDict cd)
+    {
+        var parts = new List<string>();
+        AppendProps(cd.GetValueOrDefault("final_properties") as System.Collections.IDictionary, parts, quoted: true);
+        AppendProps(cd.GetValueOrDefault("expr_properties") as System.Collections.IDictionary, parts, quoted: false);
+        return parts.Count == 0 ? "" : " " + string.Join(" ", parts);
+    }
+
+    private static void AppendProps(System.Collections.IDictionary? dict,
+        List<string> parts, bool quoted)
+    {
+        if (dict is null) return;
+        foreach (System.Collections.DictionaryEntry entry in dict)
+        {
+            string key = AsString(entry.Key);
+            if (string.IsNullOrEmpty(key)) continue;
+            var val = entry.Value;
+            // Bool-only Properties (auto/multiple/default) mit True: nur den Key.
+            if (val is bool b)
+            {
+                if (b) parts.Add(key);
+                continue;
+            }
+            var text = AsString(val);
+            if (string.IsNullOrEmpty(text)) { parts.Add(key); continue; }
+            // final_properties: Werte sind schon Python-Literal-Strings
+            // (bereits geeignet). expr_properties: rohe Python-Expressions.
+            // Fuer beide reicht der raw-String.
+            parts.Add($"{key} {text}");
+        }
+    }
+
+    private static void EmitRawAlways(StringBuilder sb, ClassDict cd, int indent)
+    {
+        var image = cd.GetValueOrDefault("image");
+        string imageText = image is null ? "" : AsString(image);
+        if (string.IsNullOrEmpty(imageText))
+        {
+            AppendIndented(sb, indent, "always");
+            return;
+        }
+        AppendIndented(sb, indent, $"always {imageText}");
+    }
+
+    // ---- Hilfen ------------------------------------------------------------
+
+    private static void AppendIndented(StringBuilder sb, int indent, string content)
+    {
+        // Leere Zeilen ohne Indent — kein trailing whitespace. unrpyc macht's
+        // genauso; erlaubt sauberen Diff mit Original-.rpy.
+        if (string.IsNullOrEmpty(content)) { sb.Append('\n'); return; }
+        for (int i = 0; i < indent; i++) sb.Append(Indent);
+        sb.Append(content).Append('\n');
+    }
+
+    /// <summary>Wandelt einen AST-Wert in seine Textrepräsentation. Für die
+    /// häufigen Wrapper-Klassen (<c>PyExpr</c>, <c>PyCode</c>) wird der
+    /// eingebettete String-Wert extrahiert; für <c>ClassDict</c> ohne bekannten
+    /// String-Content bleibt der Klassenname als Kommentar.</summary>
+    private static string AsString(object? v) => v switch
+    {
+        null => "",
+        string s => s,
+        bool b => b ? "True" : "False",
+        int i => i.ToString(CultureInfo.InvariantCulture),
+        long l => l.ToString(CultureInfo.InvariantCulture),
+        double d => d.ToString(CultureInfo.InvariantCulture),
+        ClassDict cd => ExtractPyExpr(cd),
+        IEnumerable en => string.Join(" ", en.Cast<object?>().Select(AsString)),
+        _ => v.ToString() ?? "",
+    };
+
+    /// <summary>PyExpr/PyCode sind in Ren'Py <c>str</c>-Subclasses. Beim
+    /// Unpickeln (via <c>__reduce__</c>) liefert der Catch-all ein
+    /// <c>ClassDict</c>:
+    /// <list type="bullet">
+    ///   <item><c>PyExpr</c>: <c>__args__[0]</c> ist der Text (Rest:
+    ///     Filename/Zeilennummer/Hash).</item>
+    ///   <item><c>PyCode</c>: hat einen 7-Element-<c>__state__</c>-Tupel,
+    ///     <c>state[1]</c> ist der Source-Ausdruck (selbst ein PyExpr →
+    ///     rekursiv extrahieren).</item>
+    /// </list>
+    /// Fallback: bekannte Feldnamen aus einem Dict-State.</summary>
+    private static string ExtractPyExpr(ClassDict cd)
+    {
+        if (cd.TryGetValue("__args__", out var av) && av is object[] { Length: >= 1 } args
+            && args[0] is string first) return first;
+        if (cd.TryGetValue("__state__", out var sv) && sv is object[] state)
+        {
+            // PyCode: state[1] ist die Source (PyExpr oder String)
+            if (state.Length >= 2)
+            {
+                if (state[1] is string src) return src;
+                if (state[1] is ClassDict inner) return ExtractPyExpr(inner);
+            }
+        }
+        foreach (var key in new[] { "text", "value", "expr", "code", "source" })
+            if (cd.TryGetValue(key, out var v) && v is string s) return s;
+        return $"<{cd.ClassName}>";
+    }
+
+    private static string EscapeString(string s) =>
+        s.Replace("\\", "\\\\").Replace("\"", "\\\"").Replace("\n", "\\n");
+}
+
+internal static class ClassDictExtensions
+{
+    public static object? GetValueOrDefault(this ClassDict cd, string key)
+        => cd.TryGetValue(key, out var v) ? v : null;
+}

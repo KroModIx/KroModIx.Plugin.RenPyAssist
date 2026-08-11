@@ -27,5 +27,9 @@
 
   <ItemGroup>
     <None Update="plugin.json" CopyToOutputDirectory="PreserveNewest" />
+    <!-- KrosteMod-Assets: Icons für Cheat/Hint-Screens (v0.6+). Werden
+         beim Deploy in den Ren'Py-game/-Ordner geschrieben. -->
+    <EmbeddedResource Include="Assets\krostemod_cheat.png" />
+    <EmbeddedResource Include="Assets\krostemod_hint.png" />
   </ItemGroup>
 </Project>
