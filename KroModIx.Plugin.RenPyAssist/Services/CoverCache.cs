@@ -32,6 +32,12 @@ public sealed class CoverCache
     private readonly string _cacheDir;
     private readonly F95zoneClient _client;
 
+    // In-flight-Dedup: verhindert dass 6 parallel gerenderte Views 6 mal
+    // dieselbe URL downloaden (Bandbreite sparen + Race-Warnings vermeiden).
+    // Key = coverUrl. Wert = laufender Download-Task, alle Caller warten
+    // auf dieselbe Task-Instanz. Nach Completion aus dem Dict raus.
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, Task<string?>> _inFlight = new();
+
     public CoverCache(string cacheDir, F95zoneClient client)
     {
         _cacheDir = cacheDir;
@@ -46,8 +52,20 @@ public sealed class CoverCache
 
     /// <summary>Stellt sicher dass das Cover lokal liegt. Bei Cache-Miss
     /// wird via <see cref="F95zoneClient"/> (mit Session-Cookies) nach-
-    /// geladen. Rückgabe: Pfad zur lokalen Datei oder null.</summary>
-    public async Task<string?> EnsureAsync(string coverUrl, CancellationToken ct = default)
+    /// geladen. Rückgabe: Pfad zur lokalen Datei oder null. Concurrent
+    /// Calls für dieselbe URL warten auf einen einzigen Download.</summary>
+    public Task<string?> EnsureAsync(string coverUrl, CancellationToken ct = default)
+    {
+        if (string.IsNullOrEmpty(coverUrl)) return Task.FromResult<string?>(null);
+        return _inFlight.GetOrAdd(coverUrl, url => EnsureInternalAsync(url, ct)
+            .ContinueWith(t =>
+            {
+                _inFlight.TryRemove(url, out _);
+                return t.Result;
+            }, TaskContinuationOptions.ExecuteSynchronously));
+    }
+
+    private async Task<string?> EnsureInternalAsync(string coverUrl, CancellationToken ct)
     {
         if (string.IsNullOrEmpty(coverUrl)) return null;
         var path = PathFor(coverUrl);
@@ -65,14 +83,29 @@ public sealed class CoverCache
             return null;
         }
 
-        // AVIF/WebP → PNG via ImageSharp. Fallback bei WebP: ImageSharp
-        // ab 3.x kann WebP-Decode nativ; AVIF-Decode braucht ImageSharp
-        // 4+ oder ist experimentell — bei Fehler geben wir das Original
-        // durch (Avalonia versucht Skia dann selbst).
+        // AVIF/WebP → PNG. F95zone imgproxy transkodiert alle Cover zu
+        // AVIF egal welche URL-Extension. ImageSharp 3.x kann kein AVIF
+        // (4.x ist kommerziell). Fallback-Kaskade:
+        //   1) ImageSharp (WebP, ggf. PNG/JPEG-Recode)
+        //   2) ffmpeg via Process (AVIF-Standard-Fallback, Linux idR da)
+        // Wenn beide fehlschlagen: null zurückgeben (kein Cache-Eintrag).
         if (IsAvif(bytes) || IsWebp(bytes))
         {
             var converted = TryConvertToPng(bytes);
-            if (converted is not null) bytes = converted;
+            if (converted is null && IsAvif(bytes))
+            {
+                Log.Debug("ImageSharp konnte AVIF nicht dekodieren, versuche ffmpeg-Fallback");
+                converted = await TryConvertAvifWithFfmpegAsync(bytes, ct);
+            }
+            if (converted is not null)
+            {
+                bytes = converted;
+            }
+            else
+            {
+                Log.Warn("AVIF/WebP-Decode fehlgeschlagen — Cover nicht cachbar: {Url}", coverUrl);
+                return null;
+            }
         }
 
         if (!IsValidImage(bytes))
@@ -92,6 +125,63 @@ public sealed class CoverCache
         {
             Log.Warn(ex, "Cover-Cache-Save fehlgeschlagen: {Path}", path);
             return null;
+        }
+    }
+
+    /// <summary>AVIF → PNG via ffmpeg (falls installiert). ImageSharp 3.x
+    /// kann kein AVIF, RenPack nutzt genau diesen Fallback erfolgreich.
+    /// Umweg über zwei Temp-Files statt stdin/stdout-Pipe: bei letzterer
+    /// gab's im .NET-Pipe-Wrapper partial-Write-Bugs bei ~300 KB Files.
+    /// Auf Linux (Bazzite/Fedora) ist ffmpeg praktisch immer da; auf
+    /// Windows muss der User es installieren (choco/winget). Bei fehlendem
+    /// ffmpeg: return null, kein Crash.</summary>
+    private static async Task<byte[]?> TryConvertAvifWithFfmpegAsync(byte[] avifBytes, CancellationToken ct)
+    {
+        string inPath = Path.Combine(Path.GetTempPath(), $"renpyassist-avif-{Guid.NewGuid():N}.avif");
+        string outPath = Path.Combine(Path.GetTempPath(), $"renpyassist-avif-{Guid.NewGuid():N}.png");
+        try
+        {
+            await File.WriteAllBytesAsync(inPath, avifBytes, ct);
+            var psi = new System.Diagnostics.ProcessStartInfo("ffmpeg")
+            {
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false,
+                CreateNoWindow = true,
+            };
+            psi.ArgumentList.Add("-y");
+            psi.ArgumentList.Add("-nostdin");
+            psi.ArgumentList.Add("-loglevel"); psi.ArgumentList.Add("error");
+            psi.ArgumentList.Add("-i"); psi.ArgumentList.Add(inPath);
+            psi.ArgumentList.Add("-c:v"); psi.ArgumentList.Add("png");
+            psi.ArgumentList.Add(outPath);
+
+            using var proc = System.Diagnostics.Process.Start(psi);
+            if (proc is null) return null;
+            var errTask = proc.StandardError.ReadToEndAsync(ct);
+            await proc.WaitForExitAsync(ct);
+            if (proc.ExitCode != 0 || !File.Exists(outPath))
+            {
+                Log.Warn("ffmpeg AVIF-Convert exit={Code}, stderr: {Err}", proc.ExitCode, await errTask);
+                return null;
+            }
+            return await File.ReadAllBytesAsync(outPath, ct);
+        }
+        catch (System.ComponentModel.Win32Exception)
+        {
+            // ffmpeg nicht im PATH — silently, kein Cover.
+            Log.Debug("ffmpeg nicht installiert — AVIF-Cover können nicht konvertiert werden");
+            return null;
+        }
+        catch (Exception ex)
+        {
+            Log.Warn(ex, "ffmpeg AVIF-Convert Ausnahme");
+            return null;
+        }
+        finally
+        {
+            try { if (File.Exists(inPath)) File.Delete(inPath); } catch { }
+            try { if (File.Exists(outPath)) File.Delete(outPath); } catch { }
         }
     }
 
