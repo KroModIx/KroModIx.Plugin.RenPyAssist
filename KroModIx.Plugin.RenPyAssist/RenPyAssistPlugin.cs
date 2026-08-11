@@ -20,7 +20,7 @@ public sealed class RenPyAssistPlugin : IGameModPlugin, IUpdateNotifier
     public PluginMetadata Metadata { get; } = new(
         Id: "kroste.renpyassist",
         DisplayName: "Ren'Py Assist",
-        Version: "0.1.0",
+        Version: "0.1.1",
         Author: "Kroste",
         Description: "Ordner-basierter Mod-/Update-Manager für Ren'Py-Spiele. " +
             "F95zone-Anbindung mit CSRF-Login und Session-Cookie-Ablage " +
@@ -29,14 +29,16 @@ public sealed class RenPyAssistPlugin : IGameModPlugin, IUpdateNotifier
             "bei neuer f95zone-Version, installiert ZIP-Updates in einen " +
             "neuen Sub-Ordner und kopiert Save-Games automatisch.");
 
-    // Placeholder-Target: Proton Experimental. Der Ren'Py-Kanon ist ordner-
-    // basiert, aber der Host aktiviert Plugins aktuell nur wenn mindestens
-    // ein Steam-AppId-Match läuft. Anchor bringt das Plugin in den Sidebar-
-    // Kontext bis zum Ordner-Discovery-Contract in v0.2.
+    // Anchor via plugin.json.virtualGame (Contracts v1.7.5): der Host legt
+    // beim Discovery ein Manual-Game mit SteamAppId 9000001 an und rendert
+    // die Sidebar-Kachel. Wir wählen bewusst eine ID im 9-Mio-Bereich
+    // (nicht Proton-Experimental 1493710 wie in v0.1.0), damit User mit
+    // Proton nicht plötzlich eine RenPyAssist-Kachel zusätzlich zur echten
+    // Proton-Kachel bekommen.
     public IReadOnlyList<GameTarget> Targets { get; } = new[]
     {
         new GameTarget("renpy-anchor", "Ren'Py Games (Ordner-Sammlung)",
-            SteamAppId: 1493710,
+            SteamAppId: 9000001,
             AlternativeExecutableNames: Array.Empty<string>(),
             Platforms: Platforms.Both),
     };

@@ -24,13 +24,16 @@ Ren'Py-Adult-Visual-Novels aus f95zone. Der User hat einen
 
 ## Aktivierung im Host
 
-Der KroModIx-Host aktiviert Plugins bislang nur bei installierten
-Steam-Spielen. Ren'Py Assist bindet als **Anchor** an
-**Proton Experimental (Steam AppId 1493710)** — die Kachel taucht in der
-Sidebar auf sobald Proton installiert ist. Ein ordnerbasierter Discovery-
-Contract kommt in v0.2.
+Ren'Py Assist nutzt das **`virtualGame`**-Feld im Plugin-Manifest
+(Contracts v1.7.5): der Host legt beim Discovery automatisch eine
+Manual-Sidebar-Kachel „Ren'Py Games" mit Anchor-SteamAppId `9000001`
+an, sobald das Plugin installiert ist. Kein „➕ Spiel hinzufügen"-Klick
+nötig, kein Steam-Bezug nötig.
 
-## Features (v0.1.0)
+**Braucht Host v1.7.5 oder neuer** — ältere Hosts ignorieren
+`virtualGame` und die Kachel bleibt aus.
+
+## Features (v0.1.1)
 
 ### Spiele-Tab
 - Card-Liste aller registrierter Ren'Py-Spiele mit Cover, aktuellem
@@ -95,14 +98,17 @@ Alternativ: 1-Klick-Install über die Install-Karte in der KroModIx-Sidebar
 
 ## Erste Schritte
 
-1. Plugin aktivieren (Proton Experimental in Steam installieren
-   → Sidebar-Kachel taucht auf → „Plugin installieren").
-2. Einstellungen-Tab öffnen → **Root-Ordner** setzen (der Ordner mit
-   deinen Ren'Py-Container-Unterordnern).
-3. **Speichern** — beim nächsten Öffnen des Spiele-Tabs (oder via
-   „🔄 Rescan"-Button) werden die Spiele gefunden.
-4. Optional: **f95zone-Login** eintragen (für Cover-Downloads).
-5. Pro Spiel: f95zone-Thread-URL in die Inline-TextBox einfügen,
+1. Plugin über die Sidebar-Install-Karte installieren
+   (oder Release-ZIP manuell entpacken — siehe unten).
+2. KroModIx neu starten — die Kachel **„Ren'Py Games"** erscheint
+   automatisch in der Sidebar (dank `virtualGame`).
+3. Kachel anklicken → **Einstellungen-Tab** öffnen → **Root-Ordner**
+   setzen (der Ordner mit deinen Ren'Py-Container-Unterordnern) →
+   Speichern.
+4. **Spiele-Tab** → 🔄 Rescan → deine Ren'Py-Spiele erscheinen als
+   Cards.
+5. Optional: **f95zone-Login** eintragen (für Cover-Downloads).
+6. Pro Spiel: f95zone-Thread-URL in die Inline-TextBox einfügen,
    💾 klicken → Version-Poll läuft sofort.
 
 ## Referenz
