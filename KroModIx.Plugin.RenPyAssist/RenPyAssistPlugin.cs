@@ -102,6 +102,7 @@ public sealed class RenPyAssistPlugin : IGameModPlugin, IUpdateNotifier, IGameLa
         // User-Crop (`.renpyassist/sidebar-cover.png`) > Container-Local-
         // Cover (`.renpyassist/cover.img`).
         int registered = 0, coversPropagated = 0;
+        var gifMigrationJobs = new List<(DetectedGame Game, string CoverUrl)>();
         foreach (var game in activatedGames)
         {
             if (string.IsNullOrWhiteSpace(game.InstallDir)
@@ -113,6 +114,22 @@ public sealed class RenPyAssistPlugin : IGameModPlugin, IUpdateNotifier, IGameLa
             }
             _registry.EnsureFromContainer(game.InstallDir);
             registered++;
+            // v0.8.4: GIF-Cover-Migration. Wenn die coverUrl auf .gif endet
+            // und der Cache noch keinen v084-Marker hat, wurde das Bild mit
+            // der alten Frame-0-Logik konvertiert (oft leer/blank). Container-
+            // Mirror löschen und Cache-Warm im Hintergrund anwerfen — die
+            // Kachel bleibt kurz bildlos statt ein blankes weisses Cover zu
+            // zeigen. Nach Fetch: TrySetManualGameCover setzt die Kachel neu.
+            var entry = _registry.Find(game.InstallDir);
+            var mirrorPath = GameLocalStore.CoverPath(game.InstallDir);
+            if (entry is not null
+                && !string.IsNullOrEmpty(entry.CoverUrl)
+                && _covers.NeedsV084GifMigration(entry.CoverUrl!)
+                && File.Exists(mirrorPath))
+            {
+                try { File.Delete(mirrorPath); } catch { }
+                gifMigrationJobs.Add((game, entry.CoverUrl!));
+            }
             // Cover-Path an Host propagieren (falls schon lokal gespeichert).
             var sidebar = GameLocalStore.SidebarCoverPath(game.InstallDir);
             var full = GameLocalStore.CoverPath(game.InstallDir);
@@ -129,6 +146,33 @@ public sealed class RenPyAssistPlugin : IGameModPlugin, IUpdateNotifier, IGameLa
             }
         }
 
+        // v0.8.4: GIF-Migration-Jobs im Hintergrund (fire-and-forget) —
+        // sonst blockiert der App-Start bei mehreren stalen GIF-Covern.
+        // Cache-Warm → Container-Mirror → Sidebar-Update pro Job.
+        if (gifMigrationJobs.Count > 0)
+        {
+            _ = Task.Run(async () =>
+            {
+                foreach (var (game, url) in gifMigrationJobs)
+                {
+                    try
+                    {
+                        var cached = await _covers!.EnsureAsync(url, ct);
+                        if (string.IsNullOrEmpty(cached)) continue;
+                        var mirrored = GameLocalStore.CopyCoverIntoContainer(game.InstallDir, cached);
+                        var effective = mirrored ?? cached;
+                        host.TrySetManualGameCover(game.InstallDir, effective);
+                    }
+                    catch (Exception ex)
+                    {
+                        host.Logger.Debug(ex, "GIF-Migration fehlgeschlagen: {Dir}", game.InstallDir);
+                    }
+                }
+                host.Logger.Info("GIF-Cover-Migration abgeschlossen: {N} Kacheln",
+                    gifMigrationJobs.Count);
+            }, ct);
+        }
+
         var dlDir = _settings.Current.DownloadsWatchDir;
         if (!string.IsNullOrEmpty(dlDir))
         {
@@ -142,8 +186,9 @@ public sealed class RenPyAssistPlugin : IGameModPlugin, IUpdateNotifier, IGameLa
         }
 
         _worker.Start();
-        host.Logger.Info("Ren'Py Assist v0.5.3 initialisiert: {N} Spiel-Kachel(n) registriert, " +
-            "{C} Cover propagiert, watchDir='{Dl}'", registered, coversPropagated, dlDir);
+        host.Logger.Info("Ren'Py Assist initialisiert: {N} Spiel-Kachel(n) registriert, " +
+            "{C} Cover propagiert, {G} GIF-Migration(en) im Hintergrund, watchDir='{Dl}'",
+            registered, coversPropagated, gifMigrationJobs.Count, dlDir);
         return Task.CompletedTask;
     }
 

@@ -50,6 +50,19 @@ public sealed class CoverCache
 
     public bool IsCached(string coverUrl) => File.Exists(PathFor(coverUrl));
 
+    /// <summary>Prüft ob eine GIF-Source-URL noch mit der alten v0.8.2/v0.8.3-
+    /// Logik (starr Frame 0) konvertiert wurde. Wenn ja: der Container-Mirror
+    /// enthält eventuell ein leeres/blankes Bild und muss neu geholt werden.
+    /// Genutzt vom Plugin-Init, um GIF-Kacheln proaktiv zu migrieren.</summary>
+    public bool NeedsV084GifMigration(string coverUrl)
+    {
+        if (string.IsNullOrEmpty(coverUrl)) return false;
+        if (!coverUrl.EndsWith(".gif", StringComparison.OrdinalIgnoreCase)) return false;
+        var path = PathFor(coverUrl);
+        if (!File.Exists(path)) return false; // frisch — normale Ensure-Logik ran
+        return !File.Exists(path + ".v084");
+    }
+
     /// <summary>Stellt sicher dass das Cover lokal liegt. Bei Cache-Miss
     /// wird via <see cref="F95zoneClient"/> (mit Session-Cookies) nach-
     /// geladen. Rückgabe: Pfad zur lokalen Datei oder null. Concurrent
@@ -69,6 +82,7 @@ public sealed class CoverCache
     {
         if (string.IsNullOrEmpty(coverUrl)) return null;
         var path = PathFor(coverUrl);
+        var v084Marker = path + ".v084";
         if (File.Exists(path))
         {
             var cached = await File.ReadAllBytesAsync(path, ct);
@@ -88,6 +102,16 @@ public sealed class CoverCache
                 else if (IsAvif(cached))
                 {
                     Log.Debug("Cache-Eintrag ist AVIF — invalidate, neu holen mit ffmpeg-Convert");
+                }
+                // v0.8.4: URLs die auf .gif enden und ein PNG-Cache-Ergebnis
+                // haben stammen aus v0.8.2/v0.8.3-Convert (starr Frame 0).
+                // Für viele GIFs ist Frame 0 leer (Fade-In/Splash), Kachel
+                // bleibt weiß. Einmalig re-konvertieren mit thumbnail-Filter.
+                // Marker verhindert Endlos-Reconvert bei jedem Aufruf.
+                else if (coverUrl.EndsWith(".gif", StringComparison.OrdinalIgnoreCase)
+                         && !File.Exists(v084Marker))
+                {
+                    Log.Debug("GIF-Source ohne v0.8.4-Marker — re-convert mit thumbnail-Filter: {Url}", coverUrl);
                 }
                 else
                 {
@@ -156,6 +180,12 @@ public sealed class CoverCache
             var tmp = path + ".tmp";
             await File.WriteAllBytesAsync(tmp, bytes, ct);
             File.Move(tmp, path, overwrite: true);
+            // v0.8.4-Marker: signalisiert, dass GIF-Source-URL bereits mit
+            // thumbnail-Filter konvertiert wurde. Verhindert Re-Migration.
+            if (coverUrl.EndsWith(".gif", StringComparison.OrdinalIgnoreCase))
+            {
+                try { File.WriteAllText(v084Marker, string.Empty); } catch { }
+            }
             return path;
         }
         catch (Exception ex)
@@ -192,10 +222,16 @@ public sealed class CoverCache
             psi.ArgumentList.Add("-nostdin");
             psi.ArgumentList.Add("-loglevel"); psi.ArgumentList.Add("error");
             psi.ArgumentList.Add("-i"); psi.ArgumentList.Add(inPath);
-            // Bei animierten Formaten (GIF/APNG): nur erstes Frame extrahieren.
+            // Bei animierten Formaten (GIF/APNG): repräsentatives Frame via
+            // thumbnail-Filter statt Frame 0. Grund: viele Cover-GIFs haben
+            // ein leeres/uniformes Intro-Frame (Weißfläche, Fade-In) — dann
+            // ist Frame 0 unbrauchbar (v0.8.3-Bug: Price of Desires zeigte
+            // leere Kachel). thumbnail wählt aus dem Batch das statistisch
+            // repräsentativste Frame nach Histogramm-Differenz.
             if (string.Equals(inputExt, ".gif", StringComparison.OrdinalIgnoreCase))
             {
-                psi.ArgumentList.Add("-vframes"); psi.ArgumentList.Add("1");
+                psi.ArgumentList.Add("-vf"); psi.ArgumentList.Add("thumbnail");
+                psi.ArgumentList.Add("-frames:v"); psi.ArgumentList.Add("1");
             }
             psi.ArgumentList.Add("-c:v"); psi.ArgumentList.Add("png");
             psi.ArgumentList.Add(outPath);
