@@ -1,0 +1,28 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Library</OutputType>
+    <RootNamespace>KroModIx.Plugin.RenPyAssist</RootNamespace>
+    <AssemblyName>KroModIx.Plugin.RenPyAssist</AssemblyName>
+    <!-- Plugin-DLL braucht ihre transitiven Dependencies im Bundle
+         (SixLabors.ImageSharp für AVIF/WebP → PNG von f95zone-Covers).
+         Ohne diese Property landen sie nicht in bin/. -->
+    <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Host-Assemblies: ExcludeAssets=runtime — kommen vom Host mit. -->
+    <PackageReference Include="KroModIx.Plugin.Contracts"
+                      PrivateAssets="all" ExcludeAssets="runtime" />
+    <PackageReference Include="Avalonia"
+                      PrivateAssets="all" ExcludeAssets="runtime" />
+    <PackageReference Include="CommunityToolkit.Mvvm"
+                      PrivateAssets="all" ExcludeAssets="runtime" />
+    <!-- Plugin-spezifisch: muss ins Bundle. f95zone-Cover kommen als AVIF/
+         WebP — Avalonia/Skia versteht die nicht standardmäßig. -->
+    <PackageReference Include="SixLabors.ImageSharp" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Update="plugin.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+</Project>

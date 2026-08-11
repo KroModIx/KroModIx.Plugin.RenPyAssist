@@ -1,0 +1,144 @@
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using System.Text.Json;
+using System.Text.Json.Serialization;
+using NLog;
+
+namespace KroModIx.Plugin.RenPyAssist.Services;
+
+/// <summary>Persistente Liste registrierter Ren'Py-Spiele in
+/// <c>games.json</c>. Sync-Merge: beim <see cref="Rescan"/> werden neue
+/// Container aus dem Root-Ordner hinzugefügt und weggefallene entfernt —
+/// existierende Einträge behalten ihre f95zone-Metadata (ThreadUrl,
+/// LastRemoteVersion, CoverUrl).</summary>
+public sealed class GamesRegistry
+{
+    private static readonly Logger Log = LogManager.GetCurrentClassLogger();
+
+    private readonly RenPyPaths _paths;
+    private readonly object _lock = new();
+    private List<RenPyGame> _games = new();
+
+    public GamesRegistry(RenPyPaths paths)
+    {
+        _paths = paths;
+        _games = Load() ?? new List<RenPyGame>();
+    }
+
+    public event EventHandler? Changed;
+
+    public IReadOnlyList<RenPyGame> Games
+    {
+        get { lock (_lock) return _games.ToList(); }
+    }
+
+    /// <summary>Scannt den Root nach Ren'Py-Spielen und merged in die
+    /// Registry. Neue Container werden hinzugefügt, gelöschte entfernt,
+    /// bestehende behalten f95zone-Metadata aber Version/ActiveSubPath
+    /// werden aus dem Filesystem aktualisiert.</summary>
+    public void Rescan(string root)
+    {
+        var scanned = RenPyGameDetector.Scan(root).ToDictionary(g => g.ContainerPath,
+            StringComparer.OrdinalIgnoreCase);
+
+        lock (_lock)
+        {
+            // Entfernen: was nicht mehr im Filesystem existiert
+            _games.RemoveAll(g => !scanned.ContainsKey(g.ContainerPath));
+
+            // Update oder Hinzufügen
+            foreach (var kv in scanned)
+            {
+                var existing = _games.FirstOrDefault(g =>
+                    string.Equals(g.ContainerPath, kv.Key, StringComparison.OrdinalIgnoreCase));
+                if (existing is null)
+                {
+                    _games.Add(kv.Value);
+                }
+                else
+                {
+                    existing.ActiveSubPath = kv.Value.ActiveSubPath;
+                    existing.LocalVersion = kv.Value.LocalVersion;
+                    // Name-Auto-Update nur wenn User keinen Override gesetzt hat
+                    existing.Name = kv.Value.Name;
+                }
+            }
+        }
+        Save();
+        Changed?.Invoke(this, EventArgs.Empty);
+        Log.Info("Rescan {Root}: {N} Spiele in Registry", root, _games.Count);
+    }
+
+    public void Update(RenPyGame updated)
+    {
+        lock (_lock)
+        {
+            var idx = _games.FindIndex(g =>
+                string.Equals(g.ContainerPath, updated.ContainerPath, StringComparison.OrdinalIgnoreCase));
+            if (idx >= 0) _games[idx] = updated;
+            else _games.Add(updated);
+        }
+        Save();
+        Changed?.Invoke(this, EventArgs.Empty);
+    }
+
+    public void Remove(string containerPath)
+    {
+        lock (_lock)
+        {
+            _games.RemoveAll(g =>
+                string.Equals(g.ContainerPath, containerPath, StringComparison.OrdinalIgnoreCase));
+        }
+        Save();
+        Changed?.Invoke(this, EventArgs.Empty);
+    }
+
+    /// <summary>Anzahl Spiele mit verfügbarem Update — für den Sidebar-
+    /// Kachel-Badge via IUpdateNotifier.</summary>
+    public int PendingUpdatesCount
+    {
+        get { lock (_lock) return _games.Count(g => g.HasUpdate); }
+    }
+
+    private List<RenPyGame>? Load()
+    {
+        try
+        {
+            if (!File.Exists(_paths.GamesRegistryPath)) return null;
+            var envelope = JsonSerializer.Deserialize<Envelope>(File.ReadAllText(_paths.GamesRegistryPath));
+            return envelope?.Games;
+        }
+        catch (Exception ex)
+        {
+            Log.Warn(ex, "Registry-Load fehlgeschlagen");
+            return null;
+        }
+    }
+
+    private void Save()
+    {
+        try
+        {
+            Directory.CreateDirectory(_paths.GamesRegistryDir);
+            var envelope = new Envelope { Games = _games };
+            var json = JsonSerializer.Serialize(envelope,
+                new JsonSerializerOptions { WriteIndented = true });
+            var tmp = _paths.GamesRegistryPath + ".tmp";
+            File.WriteAllText(tmp, json);
+            if (File.Exists(_paths.GamesRegistryPath)) File.Delete(_paths.GamesRegistryPath);
+            File.Move(tmp, _paths.GamesRegistryPath);
+        }
+        catch (Exception ex)
+        {
+            Log.Warn(ex, "Registry-Save fehlgeschlagen");
+        }
+    }
+
+    private sealed class Envelope
+    {
+        [JsonPropertyName("games")]
+        public List<RenPyGame> Games { get; set; } = new();
+    }
+}
