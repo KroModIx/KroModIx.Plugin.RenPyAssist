@@ -20,12 +20,12 @@ namespace KroModIx.Plugin.RenPyAssist;
 /// eigene Sidebar-Kachel (Match via <c>Target.Engine = "renpy"</c>). Pro
 /// Kachel rendert das Plugin einen dedizierten Detail-View (Cover, Version,
 /// f95zone-Thread, Update-Actions).</summary>
-public sealed class RenPyAssistPlugin : IGameModPlugin, IUpdateNotifier
+public sealed class RenPyAssistPlugin : IGameModPlugin, IUpdateNotifier, IGameLauncher
 {
     public PluginMetadata Metadata { get; } = new(
         Id: "kroste.renpyassist",
         DisplayName: "Ren'Py Assist",
-        Version: "0.7.0",
+        Version: "0.8.0",
         Author: "Kroste",
         Description: "Verwaltet Ren'Py-Spiele als eigenständige Sidebar-Kacheln " +
             "(Multi-Tile). Setup via Host-Wizard '🎮 Ordner mit Spielen scannen' " +
@@ -176,9 +176,8 @@ public sealed class RenPyAssistPlugin : IGameModPlugin, IUpdateNotifier
 
     /// <summary>Meldet dem Host pro Ren'Py-Kachel individuell ob ein Update
     /// vorliegt — der grüne ↑-Badge erscheint dann pro Sidebar-Kachel.
-    /// Braucht Steam-AppId; da wir engine-basiert matchen und keine echten
-    /// AppIds haben, funktioniert der Badge in v0.3 nur wenn der User dem
-    /// Manual-Game via Host-UI eine SteamAppId gibt — sonst kein Badge.</summary>
+    /// Ab v0.8: nutzt <c>InstallDir</c> als Match-Key (Contracts v1.10.0+)
+    /// — funktioniert für Engine-basierte Manual-Kacheln OHNE SteamAppId.</summary>
     public Task<IReadOnlyList<GameUpdateInfo>> GetPendingUpdatesAsync(CancellationToken cancellationToken)
     {
         if (_registry is null || _activatedGames.Count == 0)
@@ -187,15 +186,83 @@ public sealed class RenPyAssistPlugin : IGameModPlugin, IUpdateNotifier
         var infos = new List<GameUpdateInfo>();
         foreach (var game in _activatedGames)
         {
-            if (game.Target.SteamAppId is not int appId) continue;
             var entry = _registry.Find(game.InstallDir);
             if (entry is null || !entry.HasUpdate) continue;
             infos.Add(new GameUpdateInfo(
-                SteamAppId: appId,
+                SteamAppId: game.Target.SteamAppId ?? 0,
                 PendingCount: 1,
-                Summary: $"Ren'Py-Update verfügbar: {entry.LastRemoteVersion}"));
+                Summary: $"Ren'Py-Update verfügbar: {entry.LastRemoteVersion}")
+            {
+                InstallDir = game.InstallDir,
+            });
         }
         return Task.FromResult<IReadOnlyList<GameUpdateInfo>>(infos);
+    }
+
+    // ---- IGameLauncher (v0.8+) ----
+
+    /// <summary>Doppelklick auf die Sidebar-Kachel. Wenn ein Update verfügbar
+    /// ist: öffnet den f95zone-Thread im Browser. Sonst: startet den Ren'Py-
+    /// Launcher (<c>*.sh</c> auf Linux, <c>*.exe</c> auf Windows) im aktiven
+    /// Sub-Ordner. Rückgabe true = Plugin hat's übernommen, false =
+    /// Host-Default (was für Manual-Games ohne Executable ohnehin nicht viel
+    /// bringen würde).</summary>
+    public Task<bool> TryLaunchAsync(DetectedGame game, CancellationToken ct)
+    {
+        if (_registry is null || _host is null)
+            return Task.FromResult(false);
+        var entry = _registry.Find(game.InstallDir);
+        if (entry is null) return Task.FromResult(false);
+
+        // 1. Update vorhanden UND Thread-URL bekannt → Thread im Browser
+        if (entry.HasUpdate && !string.IsNullOrWhiteSpace(entry.ThreadUrl))
+        {
+            _host.Shell.OpenExternalUrl(entry.ThreadUrl!);
+            _host.Notifications.Notify(
+                $"Update {entry.LastRemoteVersion} für „{entry.DisplayName}\" — Thread im Browser geöffnet.",
+                NotificationLevel.Info);
+            return Task.FromResult(true);
+        }
+
+        // 2. Ren'Py-Launcher-Search
+        var dir = string.IsNullOrEmpty(entry.ActiveSubPath)
+            ? entry.ContainerPath
+            : System.IO.Path.Combine(entry.ContainerPath, entry.ActiveSubPath!);
+        var launcher = FindRenpyLauncher(dir);
+        if (launcher is null)
+        {
+            _host.Notifications.Notify(
+                $"Kein Ren'Py-Launcher in „{dir}\" gefunden.",
+                NotificationLevel.Warning);
+            return Task.FromResult(true); // wir sind zuständig, keine Host-Fallback-Chance
+        }
+
+        try
+        {
+            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(launcher)
+            {
+                WorkingDirectory = dir,
+                UseShellExecute = true,
+            });
+            _host.Notifications.Notify(
+                $"Ren'Py-Spiel gestartet: {entry.DisplayName}", NotificationLevel.Success);
+        }
+        catch (Exception ex)
+        {
+            _host.Logger.Warn(ex, "Ren'Py-Launcher-Start fehlgeschlagen: {L}", launcher);
+            _host.Notifications.Notify(
+                $"Start fehlgeschlagen: {ex.Message}", NotificationLevel.Error);
+        }
+        return Task.FromResult(true);
+    }
+
+    private static string? FindRenpyLauncher(string dir)
+    {
+        if (!System.IO.Directory.Exists(dir)) return null;
+        if (OperatingSystem.IsLinux())
+            return System.IO.Directory.EnumerateFiles(dir, "*.sh").FirstOrDefault();
+        return System.IO.Directory.EnumerateFiles(dir, "*.exe")
+            .FirstOrDefault(f => !f.EndsWith("python.exe", StringComparison.OrdinalIgnoreCase));
     }
 
     // ---- Tab-Contributions ----
