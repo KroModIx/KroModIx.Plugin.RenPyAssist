@@ -1,9 +1,8 @@
 <Project>
   <ItemGroup>
-    <!-- v1.8.0: Host-Wizard "🎮 Ordner mit Spielen scannen" fuer Ren'Py-
-         Sammlungen. Contracts unveraendert seit 1.7.5, wir pinnen aber
-         1.8.0 damit MinHostVersion-Check konsistent bleibt. -->
-    <PackageVersion Include="KroModIx.Plugin.Contracts" Version="1.8.0" />
+    <!-- v1.9.0: GameTarget.Engine — engine-basierter Multi-Tile-Match
+         (jedes Ren'Py-Spiel als eigene Sidebar-Kachel). -->
+    <PackageVersion Include="KroModIx.Plugin.Contracts" Version="1.9.0" />
     <PackageVersion Include="Avalonia" Version="12.1.0" />
     <PackageVersion Include="CommunityToolkit.Mvvm" Version="8.4.2" />
     <PackageVersion Include="MinVer" Version="7.0.0" />

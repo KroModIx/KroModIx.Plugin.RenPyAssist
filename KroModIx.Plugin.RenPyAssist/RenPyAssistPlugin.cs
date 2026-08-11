@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Avalonia.Controls;
@@ -10,35 +11,35 @@ using KroModIx.Plugin.RenPyAssist.Views;
 
 namespace KroModIx.Plugin.RenPyAssist;
 
-/// <summary>Ren'Py Assist — Ordner-basierter Mod-Manager für Ren'Py-Spiele
-/// mit f95zone.to-Anbindung. Kein Steam-App-Match — Aktivierung läuft
-/// über einen Steam-Anchor (Proton Experimental, AppId 1493710) als
-/// Placeholder, bis der Host einen ordner-basierten Discovery-Contract
-/// bekommt (v0.2).</summary>
+/// <summary>Ren'Py Assist v0.3 — Multi-Tile-Modell: jedes vom Host-Wizard
+/// „🎮 Ordner mit Spielen scannen" erkannte Ren'Py-Spiel bekommt eine
+/// eigene Sidebar-Kachel (Match via <c>Target.Engine = "renpy"</c>). Pro
+/// Kachel rendert das Plugin einen dedizierten Detail-View (Cover, Version,
+/// f95zone-Thread, Update-Actions).</summary>
 public sealed class RenPyAssistPlugin : IGameModPlugin, IUpdateNotifier
 {
     public PluginMetadata Metadata { get; } = new(
         Id: "kroste.renpyassist",
         DisplayName: "Ren'Py Assist",
-        Version: "0.2.0",
+        Version: "0.3.0",
         Author: "Kroste",
-        Description: "Ordner-basierter Mod-/Update-Manager für Ren'Py-Spiele. " +
-            "F95zone-Anbindung mit CSRF-Login und Session-Cookie-Ablage " +
-            "(verschlüsselt via Host-Secrets). Erkennt Sub-Path-Rotation " +
-            "(mehrere Version-Sub-Ordner pro Container), zeigt Update-Badge " +
-            "bei neuer f95zone-Version, installiert ZIP-Updates in einen " +
-            "neuen Sub-Ordner und kopiert Save-Games automatisch.");
+        Description: "Verwaltet Ren'Py-Spiele als eigenständige Sidebar-Kacheln " +
+            "(Multi-Tile). Setup via Host-Wizard '🎮 Ordner mit Spielen scannen' " +
+            "→ Host legt pro Ren'Py-Container eine Kachel mit engine=renpy an, " +
+            "Plugin übernimmt. Sub-Path-Rotation für Updates, game/saves/ bleibt " +
+            "erhalten. F95zone-Thread-Watch mit CSRF-Login und verschlüsselten " +
+            "Session-Cookies.");
 
-    // Anchor via Host-Wizard „🎮 Ordner mit Spielen scannen" (Host v1.8.0+):
-    // der User wählt seinen Ren'Py-Root, der Host legt ein Manual-Game mit
-    // SteamAppId 9000001 + InstallDir=<root> an. AppId 9000001 ist die
-    // Kroste-Convention für Ren'Py-Sammel-Anchor — User sieht die Zahl nie.
+    // Engine-basiertes Match ab Host v1.9.0. Der Host matched jedes
+    // Manual-Game mit Engine="renpy" gegen dieses Target — kein Steam-Bezug
+    // nötig, keine harten SteamAppId-Konventionen mehr (9000001 war v0.1/0.2).
     public IReadOnlyList<GameTarget> Targets { get; } = new[]
     {
-        new GameTarget("renpy-anchor", "Ren'Py Games (Ordner-Sammlung)",
-            SteamAppId: 9000001,
+        new GameTarget("renpy-game", "Ren'Py-Spiel",
+            SteamAppId: null,
             AlternativeExecutableNames: Array.Empty<string>(),
-            Platforms: Platforms.Both),
+            Platforms: Platforms.Both,
+            Engine: "renpy"),
     };
 
     private IHostServices? _host;
@@ -51,6 +52,7 @@ public sealed class RenPyAssistPlugin : IGameModPlugin, IUpdateNotifier
     private RenPyWorker? _worker;
     private DownloadWatcher? _downloadWatcher;
     private GameUpdateInstaller? _installer;
+    private IReadOnlyList<DetectedGame> _activatedGames = Array.Empty<DetectedGame>();
 
     public Task InitializeAsync(IHostServices host, IReadOnlyList<DetectedGame> activatedGames, CancellationToken ct)
     {
@@ -64,9 +66,8 @@ public sealed class RenPyAssistPlugin : IGameModPlugin, IUpdateNotifier
         _worker = new RenPyWorker(_registry, _f95, _settings);
         _downloadWatcher = new DownloadWatcher();
         _installer = new GameUpdateInstaller(_registry);
+        _activatedGames = activatedGames;
 
-        // Cookies aus verschlüsseltem Store restaurieren — falls User schon
-        // eingeloggt war, kein Re-Login nötig.
         var cookieBlob = _sessionStore.Load();
         if (!string.IsNullOrEmpty(cookieBlob))
         {
@@ -74,45 +75,23 @@ public sealed class RenPyAssistPlugin : IGameModPlugin, IUpdateNotifier
             host.Logger.Info("f95zone-Cookies restauriert (authenticated={Auth})", _f95.IsAuthenticated);
         }
 
-        // Root-Ermittlung (v0.2): DetectedGame.InstallDir vom Host-Wizard
-        // hat Vorrang; nur wenn der leer/Placeholder ist, fällt es auf
-        // Plugin-Settings.GamesRoot zurück (Backward-Compat für v0.1.x-
-        // Setups die den Root manuell im Settings-Tab hatten).
-        var wizardRoot = activatedGames
-            .Select(g => g.InstallDir)
-            .FirstOrDefault(p => !string.IsNullOrWhiteSpace(p)
-                              && p != "/" && p != @"C:\"
-                              && Directory.Exists(p));
-        if (!string.IsNullOrWhiteSpace(wizardRoot)
-            && !string.Equals(wizardRoot, _settings.Current.GamesRoot, StringComparison.Ordinal))
+        // v0.3: pro DetectedGame (= eine Sidebar-Kachel) einen Registry-
+        // Eintrag anlegen falls noch nicht da. RenPyGameDetector extrahiert
+        // beim Anlegen ActiveSubPath + LocalVersion aus dem Filesystem.
+        int registered = 0;
+        foreach (var game in activatedGames)
         {
-            host.Logger.Info("Root vom Host-Wizard übernommen: {Root}", wizardRoot);
-            var cur = _settings.Current;
-            _settings.Save(new RenPySettings
+            if (string.IsNullOrWhiteSpace(game.InstallDir)
+                || !Directory.Exists(game.InstallDir))
             {
-                GamesRoot = wizardRoot!,
-                DownloadsWatchDir = cur.DownloadsWatchDir,
-                CheckIntervalMinutes = cur.CheckIntervalMinutes,
-                F95Username = cur.F95Username,
-            });
+                host.Logger.Warn("Ren'Py-Kachel '{Name}' ignoriert — InstallDir fehlt: {Dir}",
+                    game.Target.DisplayName, game.InstallDir);
+                continue;
+            }
+            _registry.EnsureFromContainer(game.InstallDir);
+            registered++;
         }
 
-        // Initial-Rescan wenn Root gesetzt und existiert. Nicht blockierend —
-        // im Hintergrund, damit die Plugin-Initialisierung schnell zurückkehrt.
-        _ = Task.Run(() =>
-        {
-            try
-            {
-                var root = _settings.Current.GamesRoot;
-                if (!string.IsNullOrWhiteSpace(root) && Directory.Exists(root))
-                {
-                    _registry.Rescan(root);
-                }
-            }
-            catch (Exception ex) { host.Logger.Warn(ex, "Initial-Rescan fehlgeschlagen"); }
-        }, ct);
-
-        // Download-Watcher starten (falls Ordner konfiguriert).
         var dlDir = _settings.Current.DownloadsWatchDir;
         if (!string.IsNullOrEmpty(dlDir))
         {
@@ -126,8 +105,8 @@ public sealed class RenPyAssistPlugin : IGameModPlugin, IUpdateNotifier
         }
 
         _worker.Start();
-        host.Logger.Info("Ren'Py Assist initialisiert (root='{Root}', watchDir='{Dl}')",
-            _settings.Current.GamesRoot, dlDir);
+        host.Logger.Info("Ren'Py Assist v0.3 initialisiert: {N} Spiel-Kachel(n) registriert, watchDir='{Dl}'",
+            registered, dlDir);
         return Task.CompletedTask;
     }
 
@@ -138,7 +117,7 @@ public sealed class RenPyAssistPlugin : IGameModPlugin, IUpdateNotifier
             || _worker is null || _installer is null)
             yield break;
 
-        yield return new GamesTab(_registry, _settings, _f95, _covers, _worker, _installer, _host);
+        yield return new GameDetailTab(_registry, _f95, _covers, _worker, _installer, _host);
         yield return new SettingsTab(_settings, _f95, _sessionStore, _host);
     }
 
@@ -152,56 +131,63 @@ public sealed class RenPyAssistPlugin : IGameModPlugin, IUpdateNotifier
 
     // ---- IUpdateNotifier ----
 
-    /// <summary>Meldet dem Host wie viele Ren'Py-Spiele ein Update haben —
-    /// der grüne ↑-Badge auf der Sidebar-Kachel (Proton-Experimental-Anchor)
-    /// zeigt die Summe.</summary>
+    /// <summary>Meldet dem Host pro Ren'Py-Kachel individuell ob ein Update
+    /// vorliegt — der grüne ↑-Badge erscheint dann pro Sidebar-Kachel.
+    /// Braucht Steam-AppId; da wir engine-basiert matchen und keine echten
+    /// AppIds haben, funktioniert der Badge in v0.3 nur wenn der User dem
+    /// Manual-Game via Host-UI eine SteamAppId gibt — sonst kein Badge.</summary>
     public Task<IReadOnlyList<GameUpdateInfo>> GetPendingUpdatesAsync(CancellationToken cancellationToken)
     {
-        if (_registry is null || Targets[0].SteamAppId is null)
+        if (_registry is null || _activatedGames.Count == 0)
             return Task.FromResult<IReadOnlyList<GameUpdateInfo>>(Array.Empty<GameUpdateInfo>());
 
-        var count = _registry.PendingUpdatesCount;
-        if (count <= 0)
-            return Task.FromResult<IReadOnlyList<GameUpdateInfo>>(Array.Empty<GameUpdateInfo>());
-
-        var info = new GameUpdateInfo(
-            SteamAppId: Targets[0].SteamAppId!.Value,
-            PendingCount: count,
-            Summary: $"{count} Ren'Py-Update(s) auf f95zone");
-        return Task.FromResult<IReadOnlyList<GameUpdateInfo>>(new[] { info });
+        var infos = new List<GameUpdateInfo>();
+        foreach (var game in _activatedGames)
+        {
+            if (game.Target.SteamAppId is not int appId) continue;
+            var entry = _registry.Find(game.InstallDir);
+            if (entry is null || !entry.HasUpdate) continue;
+            infos.Add(new GameUpdateInfo(
+                SteamAppId: appId,
+                PendingCount: 1,
+                Summary: $"Ren'Py-Update verfügbar: {entry.LastRemoteVersion}"));
+        }
+        return Task.FromResult<IReadOnlyList<GameUpdateInfo>>(infos);
     }
 
     // ---- Tab-Contributions ----
 
-    private sealed class GamesTab : IGameTabContribution
+    private sealed class GameDetailTab : IGameTabContribution
     {
         private readonly GamesRegistry _registry;
-        private readonly RenPySettingsService _settings;
         private readonly F95zoneClient _f95;
         private readonly CoverCache _covers;
         private readonly RenPyWorker _worker;
         private readonly GameUpdateInstaller _installer;
         private readonly IHostServices _host;
 
-        public GamesTab(GamesRegistry registry, RenPySettingsService settings, F95zoneClient f95,
-            CoverCache covers, RenPyWorker worker, GameUpdateInstaller installer, IHostServices host)
+        public GameDetailTab(GamesRegistry registry, F95zoneClient f95, CoverCache covers,
+            RenPyWorker worker, GameUpdateInstaller installer, IHostServices host)
         {
-            _registry = registry; _settings = settings; _f95 = f95;
-            _covers = covers; _worker = worker; _installer = installer; _host = host;
+            _registry = registry; _f95 = f95; _covers = covers;
+            _worker = worker; _installer = installer; _host = host;
         }
 
-        public string Id => "games";
-        public string Label => "Spiele";
+        public string Id => "game";
+        public string Label => "Übersicht";
         public string Icon => "\U0001F3AE"; // 🎮
         public int Order => 0;
         public bool IsVisible(DetectedGame game) => true;
 
         public Control CreateView(DetectedGame game, IHostServices host)
-            => new GamesView
+        {
+            var entry = _registry.EnsureFromContainer(game.InstallDir);
+            return new RenPyGameView
             {
-                DataContext = new GamesViewModel(_registry, _settings, _f95, _covers,
+                DataContext = new RenPyGameViewModel(entry, _registry, _f95, _covers,
                     _worker, _installer, _host),
             };
+        }
     }
 
     private sealed class SettingsTab : IGameTabContribution

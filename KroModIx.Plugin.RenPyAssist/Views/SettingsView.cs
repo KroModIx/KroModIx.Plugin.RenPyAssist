@@ -16,21 +16,15 @@ public sealed class SettingsView : UserControl
         var title = new TextBlock { Text = "Ren'Py Assist — Einstellungen", Margin = new Thickness(0, 0, 0, 12) };
         title.Classes.Add("h1");
 
-        // --- Root-Ordner ---
-        var rootLabel = new TextBlock { Text = "Ren'Py-Root-Ordner:", Margin = new Thickness(0, 0, 0, 4) };
-        rootLabel.Classes.Add("section-label");
-        var rootHelp = new TextBlock
+        var intro = new TextBlock
         {
-            Text = "Verzeichnis mit deinen Ren'Py-Spielen (jedes Spiel als eigener Container-Unterordner).",
+            Text = "Der Ren'Py-Root wird ab v0.3 über den Host-Wizard „🎮 Ordner mit " +
+                   "Spielen scannen\" (Sidebar) gesetzt. Diese Einstellungen sind " +
+                   "plugin-global (Downloads-Watch, Poll-Intervall, f95zone-Login).",
             TextWrapping = TextWrapping.Wrap,
-            Margin = new Thickness(0, 0, 0, 6),
+            Margin = new Thickness(0, 0, 0, 16),
         };
-        rootHelp.Classes.Add("secondary");
-        var rootBox = new TextBox { Width = 500, HorizontalAlignment = HorizontalAlignment.Left };
-        rootBox.Bind(TextBox.TextProperty, new Binding(nameof(SettingsViewModel.GamesRoot)) { Mode = BindingMode.TwoWay });
-        var pickRootBtn = new Button { Content = "📂  Ordner wählen", Margin = new Thickness(8, 0, 0, 0) };
-        pickRootBtn.Bind(Button.CommandProperty, new Binding(nameof(SettingsViewModel.PickRootCommand)));
-        var rootRow = new StackPanel { Orientation = Orientation.Horizontal, Children = { rootBox, pickRootBtn } };
+        intro.Classes.Add("secondary");
 
         // --- Downloads-Ordner ---
         var dlLabel = new TextBlock { Text = "Downloads-Watch-Ordner:", Margin = new Thickness(0, 20, 0, 4) };
@@ -135,8 +129,7 @@ public sealed class SettingsView : UserControl
                 Margin = new Thickness(20, 16, 20, 14),
                 Children =
                 {
-                    title,
-                    rootLabel, rootHelp, rootRow,
+                    title, intro,
                     dlLabel, dlHelp, dlRow,
                     intervalLabel, intervalHelp, intervalBox,
                     saveBtn, statusTb,

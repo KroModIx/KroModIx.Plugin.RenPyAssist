@@ -1,5 +1,4 @@
 using System;
-using System.IO;
 using System.Threading.Tasks;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
@@ -8,8 +7,10 @@ using KroModIx.Plugin.RenPyAssist.Services;
 
 namespace KroModIx.Plugin.RenPyAssist.Views;
 
-/// <summary>ViewModel für den Einstellungen-Tab. Verwaltet Root-Ordner,
-/// Downloads-Ordner, Poll-Intervall und f95zone-Login.</summary>
+/// <summary>Plugin-globale Einstellungen (v0.3+): Downloads-Watch, Poll-
+/// Intervall, f95zone-Login. Der Ren'Py-Root wird nicht mehr hier gesetzt —
+/// jedes Spiel ist eine eigene Sidebar-Kachel, deren Container-Pfad vom
+/// Host-Wizard „🎮 Ordner mit Spielen scannen" kommt.</summary>
 public sealed partial class SettingsViewModel : ObservableObject
 {
     private readonly RenPySettingsService _settings;
@@ -17,7 +18,6 @@ public sealed partial class SettingsViewModel : ObservableObject
     private readonly F95zoneSessionStore _sessionStore;
     private readonly IHostServices _host;
 
-    [ObservableProperty] private string _gamesRoot = "";
     [ObservableProperty] private string _downloadsDir = "";
     [ObservableProperty] private int _intervalMinutes = 60;
     [ObservableProperty] private string _f95Username = "";
@@ -34,7 +34,6 @@ public sealed partial class SettingsViewModel : ObservableObject
         _sessionStore = sessionStore;
         _host = host;
 
-        _gamesRoot = _settings.Current.GamesRoot;
         _downloadsDir = _settings.Current.DownloadsWatchDir ?? "";
         _intervalMinutes = _settings.Current.CheckIntervalMinutes;
         _f95Username = _settings.Current.F95Username;
@@ -49,13 +48,6 @@ public sealed partial class SettingsViewModel : ObservableObject
     }
 
     [RelayCommand]
-    private async Task PickRootAsync()
-    {
-        var picked = await _host.Dialogs.PickFolderAsync("Ren'Py-Root-Ordner wählen");
-        if (!string.IsNullOrEmpty(picked)) GamesRoot = picked;
-    }
-
-    [RelayCommand]
     private async Task PickDownloadsAsync()
     {
         var picked = await _host.Dialogs.PickFolderAsync("Downloads-Ordner wählen");
@@ -65,21 +57,16 @@ public sealed partial class SettingsViewModel : ObservableObject
     [RelayCommand]
     private async Task SaveAsync()
     {
-        if (!string.IsNullOrWhiteSpace(GamesRoot) && !Directory.Exists(GamesRoot))
-        {
-            await _host.Dialogs.ShowMessageAsync("Root-Ordner ungültig",
-                "Der Root-Ordner existiert nicht.");
-            return;
-        }
         _settings.Save(new RenPySettings
         {
-            GamesRoot = GamesRoot ?? "",
+            GamesRoot = _settings.Current.GamesRoot, // legacy, wird nicht mehr genutzt
             DownloadsWatchDir = string.IsNullOrWhiteSpace(DownloadsDir) ? null : DownloadsDir,
             CheckIntervalMinutes = Math.Max(15, IntervalMinutes),
             F95Username = F95Username ?? "",
         });
         StatusText = $"Gespeichert um {DateTime.Now:HH:mm:ss}.";
         _host.Notifications.Notify("Einstellungen gespeichert", NotificationLevel.Success);
+        await Task.CompletedTask;
     }
 
     [RelayCommand]
@@ -98,15 +85,14 @@ public sealed partial class SettingsViewModel : ObservableObject
             if (ok)
             {
                 _sessionStore.Save(_f95.ExportCookies());
-                // Username persistieren, Passwort NIE — Session-Cookie reicht.
                 _settings.Save(new RenPySettings
                 {
-                    GamesRoot = GamesRoot,
+                    GamesRoot = _settings.Current.GamesRoot,
                     DownloadsWatchDir = string.IsNullOrWhiteSpace(DownloadsDir) ? null : DownloadsDir,
                     CheckIntervalMinutes = Math.Max(15, IntervalMinutes),
                     F95Username = F95Username,
                 });
-                F95Password = ""; // aus Memory tilgen
+                F95Password = "";
                 LoginStatusText = $"✔ Eingeloggt als {F95Username}";
                 _host.Notifications.Notify("f95zone-Login erfolgreich", NotificationLevel.Success);
             }
@@ -124,10 +110,7 @@ public sealed partial class SettingsViewModel : ObservableObject
             LoginStatusText = "✘ Fehler: " + ex.Message;
             _host.Logger.Warn(ex, "f95zone-Login-Ausnahme");
         }
-        finally
-        {
-            IsLoggingIn = false;
-        }
+        finally { IsLoggingIn = false; }
     }
 
     [RelayCommand]

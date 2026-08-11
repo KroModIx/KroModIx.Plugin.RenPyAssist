@@ -71,6 +71,51 @@ public sealed class GamesRegistry
         Log.Info("Rescan {Root}: {N} Spiele in Registry", root, _games.Count);
     }
 
+    /// <summary>Findet den Registry-Eintrag zu einem Container-Pfad
+    /// (case-insensitive). Null wenn nicht registriert.</summary>
+    public RenPyGame? Find(string containerPath)
+    {
+        lock (_lock)
+        {
+            return _games.FirstOrDefault(g =>
+                string.Equals(g.ContainerPath, containerPath, StringComparison.OrdinalIgnoreCase));
+        }
+    }
+
+    /// <summary>Ab v0.3 (Host-Wizard-Multi-Tile): pro Container legt der Host
+    /// eine eigene Sidebar-Kachel an. Diese Methode wird pro DetectedGame
+    /// aufgerufen und legt den Registry-Eintrag an falls er noch nicht
+    /// existiert. Bei existierendem Eintrag: ActiveSubPath/LocalVersion aus
+    /// dem Filesystem aktualisieren, f95zone-Metadata bleibt.</summary>
+    public RenPyGame EnsureFromContainer(string containerPath)
+    {
+        var detected = RenPyGameDetector.DetectOne(containerPath);
+        lock (_lock)
+        {
+            var existing = _games.FirstOrDefault(g =>
+                string.Equals(g.ContainerPath, containerPath, StringComparison.OrdinalIgnoreCase));
+            if (existing is null)
+            {
+                var newGame = detected ?? new RenPyGame
+                {
+                    Name = Path.GetFileName(containerPath),
+                    ContainerPath = containerPath,
+                };
+                _games.Add(newGame);
+                Save();
+                Changed?.Invoke(this, EventArgs.Empty);
+                return newGame;
+            }
+            if (detected is not null)
+            {
+                existing.ActiveSubPath = detected.ActiveSubPath;
+                existing.LocalVersion = detected.LocalVersion;
+            }
+            Save();
+            return existing;
+        }
+    }
+
     public void Update(RenPyGame updated)
     {
         lock (_lock)

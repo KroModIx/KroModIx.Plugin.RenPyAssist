@@ -24,36 +24,32 @@ Ren'Py-Adult-Visual-Novels aus f95zone. Der User hat einen
 
 ## Aktivierung im Host
 
-Ab v0.2.0: **Host-Wizard „🎮 Ordner mit Spielen scannen"** (Host v1.8.0+).
-Klick auf das 🎮-Icon in der Sidebar → Ren'Py-Root wählen → Host scannt
-rekursiv nach `game/`-Marker → „N Ren'Py-Spiele gefunden. Importieren?"
-→ Sammel-Kachel entsteht in der Sidebar, RenPyAssist übernimmt.
+Ab v0.3.0 (Multi-Tile): **Host-Wizard „🎮 Ordner mit Spielen scannen"**
+(Host v1.9.0+). Klick auf 🎮 in der Sidebar → Ren'Py-Root wählen →
+Host scannt rekursiv nach `game/`-Marker → „N Ren'Py-Spiele gefunden.
+Importieren?" → **pro Spiel** entsteht **eine eigene Sidebar-Kachel**,
+RenPyAssist übernimmt jede über engine-basiertes Matching
+(`target.engine = "renpy"`).
 
-Kein Steam-Bezug nötig. Der Root-Ordner kommt vom Wizard direkt ins
-Plugin — das Plugin-Settings-Root-Feld ist nur noch Backward-Compat-
-Fallback für User die pre-v0.2 den Root manuell gesetzt hatten.
+Kein Steam-Bezug nötig. Jede Kachel ist ein eigener Container-Ordner
+(mit `game/`-Marker oder Sub-Version-Ordnern), Plugin rendert für jede
+eine Detail-View mit Cover, Version, Thread-URL, Actions.
 
-**Braucht Host v1.8.0 oder neuer.**
+**Braucht Host v1.9.0 oder neuer.**
 
-## Features (v0.2.0)
+## Features (v0.3.0)
 
-### Spiele-Tab
-- Card-Liste aller registrierter Ren'Py-Spiele mit Cover, aktuellem
-  Sub-Ordner, lokaler + remote Version
-- **🔄 Rescan** merged Filesystem gegen Registry (neue Container rein,
-  verschwundene raus, f95zone-Metadata bleibt bei bestehenden erhalten)
-- **⬇ Updates prüfen** pollt alle verknüpften Threads sofort
-  (Rate-Limit 1 s zwischen Requests)
-- Inline-TextBox pro Row zum Setzen der f95zone-Thread-URL
-- **▶ Start** öffnet den Ren'Py-Launcher (`*.sh` auf Linux, `*.exe` auf
-  Windows) im aktiven Sub-Ordner
-- **⬆ Update installieren** entpackt eine ZIP in einen neuen Sub-Ordner,
-  kopiert Save-Games mit, rotiert die aktive Version — der alte
-  Sub-Ordner bleibt liegen (Safety-Net)
-- **📂 Ordner** öffnet den aktiven Sub-Path im Datei-Explorer
+### Übersicht-Tab (pro Sidebar-Kachel)
+- Großes Cover (aus f95zone via CoverCache)
+- Titel + Update-Badge (grün wenn HasUpdate)
+- Sub-Path (welcher Version-Sub-Ordner ist aktiv)
+- Lokale Version + Remote Version + „zuletzt geprüft"-Zeitstempel
+- Inline-Editor für die f95zone-Thread-URL + 💾 Speichern
+- Actions: **▶ Start** (öffnet Ren'Py-Launcher), **⬆ Update installieren**
+  (ZIP-Picker → entpackt in neuen Sub-Ordner + kopiert Save-Games),
+  **🔄 Prüfen** (sofortiger f95zone-Poll), **📂 Ordner**
 
-### Einstellungen-Tab
-- Ren'Py-Root-Ordner (Pflicht)
+### Einstellungen-Tab (plugin-global)
 - Downloads-Watch-Ordner (Default `~/Downloads`) — überwacht ZIPs
 - Update-Check-Intervall (Default 60 min, min 15 min)
 - **f95zone-Login** (User/Passwort → Session-Cookies verschlüsselt via
@@ -104,13 +100,22 @@ Alternativ: 1-Klick-Install über die Install-Karte in der KroModIx-Sidebar
    (oder Release-ZIP manuell entpacken — siehe unten).
 2. In der Sidebar auf **🎮** (neben „➕ Spiel hinzufügen") klicken.
 3. Root-Ordner deiner Ren'Py-Sammlung wählen → **🔍 Scannen** →
-   Host meldet „Ren'Py: N Spiele gefunden" → **Sammlung importieren**.
-4. Neue Sidebar-Kachel „Ren'Py Games" anklicken → **Spiele-Tab** zeigt
-   deine Spiele als Cards.
+   Host meldet „Ren'Py: N Spiele gefunden" → **Spiele importieren**.
+4. Die Sidebar hat jetzt **eine Kachel pro Ren'Py-Spiel**. Anklicken →
+   **Übersicht-Tab** zeigt Details des Spiels.
 5. Optional: **Einstellungen-Tab** → **f95zone-Login** eintragen
    (für Cover-Downloads).
-6. Pro Spiel: f95zone-Thread-URL in die Inline-TextBox einfügen,
-   💾 klicken → Version-Poll läuft sofort.
+6. Pro Spiel: f95zone-Thread-URL in das Inline-Feld einfügen, 💾 klicken
+   → Version-Poll läuft sofort, Cover erscheint automatisch.
+
+## Migration von v0.2 → v0.3
+
+Die alte Sammel-Kachel „Ren'Py Games" von v0.2 (SteamAppId 9000001)
+matched das v0.3-Plugin **nicht mehr**. Nach dem Update:
+
+- Alte Sammel-Kachel per Rechtsklick → „Aus Sidebar entfernen"
+  (der Ordner auf der Platte bleibt unberührt).
+- Wizard-Lauf erneut ausführen → jetzt entstehen Per-Spiel-Kacheln.
 
 ## Referenz
 
