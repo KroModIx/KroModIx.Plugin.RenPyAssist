@@ -71,8 +71,33 @@ public sealed class CoverCache
         var path = PathFor(coverUrl);
         if (File.Exists(path))
         {
-            if (IsValidImage(await File.ReadAllBytesAsync(path, ct))) return path;
-            Log.Debug("Cache-Eintrag ungültig, wird neu geladen: {Path}", path);
+            var cached = await File.ReadAllBytesAsync(path, ct);
+            if (IsValidImage(cached))
+            {
+                // v0.8.3: Auto-Invalidate für alte gecachte Riesen-GIFs, die
+                // vor dem v0.8.2-Fix (GIF → first-frame via ffmpeg) im Cache
+                // landeten. Ohne diesen Check bleibt das ungefixte 13 MB GIF
+                // ewig im Cache und der User sieht kein Cover.
+                if (IsGif(cached) && cached.Length > 500 * 1024)
+                {
+                    Log.Debug("Cache-Eintrag ist grosses GIF ({KB} KB) — invalidate, neu holen mit ffmpeg-Convert",
+                        cached.Length / 1024);
+                }
+                // Und auch AVIF-Files die vor v0.5.2 (Dedup+ffmpeg-Fallback)
+                // eventuell im Cache landeten — Avalonia kann sie nicht laden.
+                else if (IsAvif(cached))
+                {
+                    Log.Debug("Cache-Eintrag ist AVIF — invalidate, neu holen mit ffmpeg-Convert");
+                }
+                else
+                {
+                    return path;
+                }
+            }
+            else
+            {
+                Log.Debug("Cache-Eintrag ungültig, wird neu geladen: {Path}", path);
+            }
             try { File.Delete(path); } catch { }
         }
 

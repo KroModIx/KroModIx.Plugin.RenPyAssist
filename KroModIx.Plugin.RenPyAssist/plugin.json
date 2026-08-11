@@ -2,7 +2,7 @@
   "schema": 1,
   "id": "kroste.renpyassist",
   "displayName": "Ren'Py Assist",
-  "version": "0.8.2",
+  "version": "0.8.3",
   "author": "Kroste",
   "description": "Verwaltet Ren'Py-Spiele als eigenständige Sidebar-Kacheln. Ab v0.6: KrosteMod-Pipeline (Walkthrough/Cheat/Rename) — Plugin dekompiliert alle .rpyc, analysiert die .rpy und deployt einen fertigen Mod ins game/-Verzeichnis mit Uninstall-Manifest. Übersichts-View v0.5+ (Titel/Cover/Beschreibung KI-übersetzt/Genre), RPA-Archive-Browser + Save-Editor (v0.4). Setup via Host-Wizard '🎮 Ordner mit Spielen scannen'. Sub-Path-Rotation für Updates, F95zone-Login mit verschlüsselten Session-Cookies.",
   "assembly": "KroModIx.Plugin.RenPyAssist.dll",
