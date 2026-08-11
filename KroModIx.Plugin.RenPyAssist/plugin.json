@@ -2,7 +2,7 @@
   "schema": 1,
   "id": "kroste.renpyassist",
   "displayName": "Ren'Py Assist",
-  "version": "0.5.1",
+  "version": "0.5.2",
   "author": "Kroste",
   "description": "Verwaltet Ren'Py-Spiele als eigenständige Sidebar-Kacheln. Übersichts-View v0.5+: Titel groß zentriert, Cover, Beschreibung (KI-übersetzt in System-Locale) und Genre — alle Metadata werden vom f95zone-Thread gescrapet. Config + Cover werden im Container-Ordner (.renpyassist/) gespeichert und wandern mit dem Ordner. RPA-Archive-Browser (v0.4), Save-Editor (v0.4). Setup via Host-Wizard '🎮 Ordner mit Spielen scannen'. Sub-Path-Rotation für Updates, F95zone-Login mit verschlüsselten Session-Cookies.",
   "assembly": "KroModIx.Plugin.RenPyAssist.dll",

@@ -110,9 +110,16 @@ public sealed partial class RenPyGameViewModel : ObservableObject
                 _game.LocalCoverPath = mirrored;
                 _registry.Update(_game);
             }
-            try { _host.TrySetManualGameCover(_containerPath, path); }
+            // Sidebar-Kachel: der User-gewählte Ausschnitt gewinnt gegen
+            // das Auto-Cover. Wenn `.renpyassist/sidebar-cover.png` existiert,
+            // den propagieren, sonst das Auto-Cover. Ohne diesen Check
+            // überschreibt jeder View-Reload den gecropten Ausschnitt.
+            var sidebarOverride = GameLocalStore.SidebarCoverPath(_containerPath);
+            var effectiveSidebarPath = File.Exists(sidebarOverride) ? sidebarOverride : path;
+            try { _host.TrySetManualGameCover(_containerPath, effectiveSidebarPath); }
             catch { }
         }
+        // Detail-View zeigt immer das volle Cover (nicht den Sidebar-Ausschnitt)
         TrySetCoverFromFile(path);
     }
 
