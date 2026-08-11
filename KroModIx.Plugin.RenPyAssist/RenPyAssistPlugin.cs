@@ -7,6 +7,9 @@ using System.Threading.Tasks;
 using Avalonia.Controls;
 using KroModIx.Plugin.Contracts;
 using KroModIx.Plugin.RenPyAssist.Services;
+using KroModIx.Plugin.RenPyAssist.Services.Preview;
+using KroModIx.Plugin.RenPyAssist.Services.Rpa;
+using KroModIx.Plugin.RenPyAssist.Services.Saves;
 using KroModIx.Plugin.RenPyAssist.Views;
 
 namespace KroModIx.Plugin.RenPyAssist;
@@ -21,7 +24,7 @@ public sealed class RenPyAssistPlugin : IGameModPlugin, IUpdateNotifier
     public PluginMetadata Metadata { get; } = new(
         Id: "kroste.renpyassist",
         DisplayName: "Ren'Py Assist",
-        Version: "0.3.3",
+        Version: "0.4.0",
         Author: "Kroste",
         Description: "Verwaltet Ren'Py-Spiele als eigenständige Sidebar-Kacheln " +
             "(Multi-Tile). Setup via Host-Wizard '🎮 Ordner mit Spielen scannen' " +
@@ -52,6 +55,10 @@ public sealed class RenPyAssistPlugin : IGameModPlugin, IUpdateNotifier
     private RenPyWorker? _worker;
     private DownloadWatcher? _downloadWatcher;
     private GameUpdateInstaller? _installer;
+    // v0.4: RPA-Extract + Save-Editor + Media-Preview
+    private RenpyArchiveService? _rpaService;
+    private RenpySaveService? _saveService;
+    private MediaPreviewService? _previewService;
     private IReadOnlyList<DetectedGame> _activatedGames = Array.Empty<DetectedGame>();
 
     public Task InitializeAsync(IHostServices host, IReadOnlyList<DetectedGame> activatedGames, CancellationToken ct)
@@ -66,6 +73,9 @@ public sealed class RenPyAssistPlugin : IGameModPlugin, IUpdateNotifier
         _worker = new RenPyWorker(_registry, _f95, _settings);
         _downloadWatcher = new DownloadWatcher();
         _installer = new GameUpdateInstaller(_registry);
+        _rpaService = new RenpyArchiveService();
+        _saveService = new RenpySaveService();
+        _previewService = new MediaPreviewService();
         _activatedGames = activatedGames;
 
         var cookieBlob = _sessionStore.Load();
@@ -114,10 +124,13 @@ public sealed class RenPyAssistPlugin : IGameModPlugin, IUpdateNotifier
     {
         if (_host is null || _settings is null || _registry is null
             || _f95 is null || _sessionStore is null || _covers is null
-            || _worker is null || _installer is null)
+            || _worker is null || _installer is null
+            || _rpaService is null || _saveService is null || _previewService is null)
             yield break;
 
         yield return new GameDetailTab(_registry, _f95, _covers, _worker, _installer, _host);
+        yield return new ArchivesTab(_rpaService, _previewService, _registry, _host);
+        yield return new SavesTab(_saveService, _registry, _host);
         yield return new SettingsTab(_settings, _f95, _sessionStore, _host);
     }
 
@@ -186,6 +199,62 @@ public sealed class RenPyAssistPlugin : IGameModPlugin, IUpdateNotifier
             {
                 DataContext = new RenPyGameViewModel(entry, _registry, _f95, _covers,
                     _worker, _installer, _host),
+            };
+        }
+    }
+
+    private sealed class ArchivesTab : IGameTabContribution
+    {
+        private readonly RenpyArchiveService _rpa;
+        private readonly MediaPreviewService _preview;
+        private readonly GamesRegistry _registry;
+        private readonly IHostServices _host;
+
+        public ArchivesTab(RenpyArchiveService rpa, MediaPreviewService preview,
+            GamesRegistry registry, IHostServices host)
+        {
+            _rpa = rpa; _preview = preview; _registry = registry; _host = host;
+        }
+
+        public string Id => "archives";
+        public string Label => "Archive";
+        public string Icon => "\U0001F4E6"; // 📦
+        public int Order => 10;
+        public bool IsVisible(DetectedGame game) => true;
+
+        public Control CreateView(DetectedGame game, IHostServices host)
+        {
+            var entry = _registry.EnsureFromContainer(game.InstallDir);
+            return new ArchivesView
+            {
+                DataContext = new ArchivesViewModel(entry.ContainerPath, entry.ActiveSubPath,
+                    _rpa, _preview, _host),
+            };
+        }
+    }
+
+    private sealed class SavesTab : IGameTabContribution
+    {
+        private readonly RenpySaveService _saves;
+        private readonly GamesRegistry _registry;
+        private readonly IHostServices _host;
+
+        public SavesTab(RenpySaveService saves, GamesRegistry registry, IHostServices host)
+        { _saves = saves; _registry = registry; _host = host; }
+
+        public string Id => "saves";
+        public string Label => "Saves";
+        public string Icon => "\U0001F4BE"; // 💾
+        public int Order => 20;
+        public bool IsVisible(DetectedGame game) => true;
+
+        public Control CreateView(DetectedGame game, IHostServices host)
+        {
+            var entry = _registry.EnsureFromContainer(game.InstallDir);
+            return new SavesView
+            {
+                DataContext = new SavesViewModel(entry.ContainerPath, entry.ActiveSubPath,
+                    _saves, _host),
             };
         }
     }

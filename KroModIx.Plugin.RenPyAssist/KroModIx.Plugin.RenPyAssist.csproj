@@ -20,6 +20,9 @@
     <!-- Plugin-spezifisch: muss ins Bundle. f95zone-Cover kommen als AVIF/
          WebP — Avalonia/Skia versteht die nicht standardmäßig. -->
     <PackageReference Include="SixLabors.ImageSharp" />
+    <!-- Python-Pickle-Deserializer fuer RPA-Archive-Index + Save-Files
+         (beides Ren'Py Pickle-Format). -->
+    <PackageReference Include="Razorvine.Pickle" />
   </ItemGroup>
 
   <ItemGroup>

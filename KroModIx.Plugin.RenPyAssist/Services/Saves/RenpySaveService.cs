@@ -1,0 +1,644 @@
+using System.Collections;
+using System.Globalization;
+using System.IO.Compression;
+using System.Runtime.CompilerServices;
+using System.Text.Json;
+using NLog;
+using Razorvine.Pickle;
+using Razorvine.Pickle.Objects;
+
+namespace KroModIx.Plugin.RenPyAssist.Services.Saves;
+
+/// <summary>
+/// Liest Ren'Py-Saves (.save). Format-Referenz: renpy.savelocation und
+/// renpy.loadsave im Ren'Py-Quellcode.
+///
+/// Aufbau eines Saves:
+///   ZIP-Container mit Einträgen:
+///     - "log"         Pickle (protocol 2–5) von (roots, log). In neueren Ren'Py-
+///                     Versionen NICHT mehr zlib-komprimiert (0x80 = Pickle-Proto);
+///                     alte Saves sind zlib (0x78).
+///     - "json"        JSON-Metadaten (save_name, save_time, renpy_version …)
+///     - "screenshot.png"  PNG-Vorschau
+///     - "signatures"  (optional) HMAC-Signaturen
+///     - "renpy_version" ASCII-Version
+///     - "extra_info"  (optional)
+///
+/// Der <c>roots</c>-Dict enthält direkt die vollqualifizierten Store-Variablen
+/// (Keys wie <c>store.money</c>, <c>store._menu</c>, <c>persistent.foo</c>) — kein
+/// verschachtelter Namespace-Wrapper.
+/// </summary>
+public sealed class RenpySaveService
+{
+    private static readonly Logger Log = LogManager.GetCurrentClassLogger();
+    private static int _initDone;
+
+    public RenpySaveService() => EnsureInitialized();
+
+    public void Write(string sourcePath, string destinationPath,
+        IReadOnlyList<SaveEdit> edits, string? newSaveName = null,
+        bool dropSignatures = true)
+    {
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        Log.Info("Schreibe Save: {src} → {dst} ({edits} Änderung(en), signatures={sig})",
+            sourcePath, destinationPath, edits.Count, dropSignatures ? "verwerfen" : "erhalten");
+
+        // Original einlesen und log-Bytes patchen.
+        byte[] originalLog;
+        byte[]? originalJson;
+        var extraEntries = new List<(string name, byte[] data)>();
+        using (var src = ZipFile.OpenRead(sourcePath))
+        {
+            originalLog = ReadEntryBytes(src, "log")
+                ?? throw new InvalidDataException("Quell-Save enthält keinen 'log'-Eintrag.");
+            originalJson = ReadEntryBytes(src, "json");
+            foreach (var e in src.Entries)
+            {
+                if (e.Name is "log" or "json") continue;
+                if (dropSignatures && e.Name == "signatures") continue;
+                using var s = e.Open();
+                using var ms = new MemoryStream();
+                s.CopyTo(ms);
+                extraEntries.Add((e.FullName, ms.ToArray()));
+            }
+        }
+
+        byte[] patchedLog = PatchLog(originalLog, edits);
+        byte[]? patchedJson = newSaveName is null ? originalJson : PatchSaveName(originalJson, newSaveName);
+
+        // Neues ZIP schreiben. Wenn destination == source, erst in Tempdatei und dann move.
+        string writeTarget = string.Equals(Path.GetFullPath(sourcePath), Path.GetFullPath(destinationPath),
+            StringComparison.Ordinal)
+            ? destinationPath + ".tmp"
+            : destinationPath;
+
+        if (File.Exists(writeTarget)) File.Delete(writeTarget);
+        using (var dst = ZipFile.Open(writeTarget, ZipArchiveMode.Create))
+        {
+            WriteEntry(dst, "log", patchedLog);
+            if (patchedJson is not null) WriteEntry(dst, "json", patchedJson);
+            foreach (var (name, data) in extraEntries) WriteEntry(dst, name, data);
+        }
+        if (!ReferenceEquals(writeTarget, destinationPath) && writeTarget != destinationPath)
+        {
+            File.Move(writeTarget, destinationPath, overwrite: true);
+        }
+
+        Log.Info("Save geschrieben: {ms} ms", sw.ElapsedMilliseconds);
+    }
+
+    private static byte[] PatchLog(byte[] originalLog, IReadOnlyList<SaveEdit> edits)
+    {
+        if (edits.Count == 0) return originalLog;
+
+        // Der log ist meist rohes Pickle (0x80), älter zlib (0x78). Für zlib erst
+        // dekomprimieren, patchen, dann NICHT wieder komprimieren — Ren'Py liest
+        // beides (der 0x78/0x80-Diskriminator im Reader beider Seiten steckt).
+        // Damit bleiben die Splice-Positionen einfach nachvollziehbar.
+        bool wasZlib = originalLog.Length > 0 && originalLog[0] == 0x78;
+        byte[] pickle = wasZlib ? ZlibDecompress(originalLog) : originalLog;
+
+        var patches = new List<PicklePatcher.PatchOp>(edits.Count);
+        foreach (var edit in edits)
+        {
+            var span = PicklePatcher.FindStoreValue(pickle, edit.Name);
+            var newBytes = PicklePatcher.EncodeValue(edit.NewValue);
+            patches.Add(new PicklePatcher.PatchOp(span.Position, span.Length, newBytes));
+            Log.Debug("Patch {name}: pos={pos} len={old}→{new}",
+                edit.Name, span.Position, span.Length, newBytes.Length);
+        }
+        return PicklePatcher.Splice(pickle, patches);
+    }
+
+    private static byte[]? PatchSaveName(byte[]? originalJson, string newSaveName)
+    {
+        if (originalJson is null) return null;
+        try
+        {
+            using var doc = JsonDocument.Parse(originalJson);
+            var dict = new Dictionary<string, object?>(StringComparer.Ordinal);
+            foreach (var p in doc.RootElement.EnumerateObject())
+                dict[p.Name] = JsonToObject(p.Value);
+            dict["_save_name"] = newSaveName;
+            return JsonSerializer.SerializeToUtf8Bytes(dict);
+        }
+        catch (JsonException)
+        {
+            return originalJson;
+        }
+    }
+
+    private static void WriteEntry(ZipArchive zip, string name, byte[] data)
+    {
+        var entry = zip.CreateEntry(name);
+        using var s = entry.Open();
+        s.Write(data);
+    }
+
+    public SaveInfo Read(string savePath)
+    {
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        Log.Info("Lese Save: {path}", savePath);
+
+        using var zip = ZipFile.OpenRead(savePath);
+
+        var metadata = ReadMetadata(zip);
+        byte[]? screenshot = ReadEntryBytes(zip, "screenshot.png");
+        string? logError = null;
+        IReadOnlyList<SaveVariable> variables = [];
+
+        try
+        {
+            object? logRoot = ReadLog(zip);
+            variables = ExtractVariables(logRoot);
+            Log.Info("Save gelesen: {vars} Variable(n), {ms} ms",
+                variables.Count, sw.ElapsedMilliseconds);
+        }
+        catch (Exception ex)
+        {
+            logError = ex.Message;
+            Log.Warn(ex, "Log-Eintrag im Save konnte nicht dekodiert werden: {path}", savePath);
+        }
+
+        return new SaveInfo(savePath, metadata, screenshot, variables, logError);
+    }
+
+    // ---- Metadaten ---------------------------------------------------------
+
+    private static SaveMetadata ReadMetadata(ZipArchive zip)
+    {
+        byte[]? jsonBytes = ReadEntryBytes(zip, "json");
+        if (jsonBytes is null || jsonBytes.Length == 0)
+            return new SaveMetadata(null, null, null, null,
+                new Dictionary<string, object?>());
+
+        try
+        {
+            using var doc = JsonDocument.Parse(jsonBytes);
+            var raw = new Dictionary<string, object?>(StringComparer.Ordinal);
+            foreach (var p in doc.RootElement.EnumerateObject())
+                raw[p.Name] = JsonToObject(p.Value);
+
+            return new SaveMetadata(
+                SaveName: raw.TryGetValue("_save_name", out var n) ? n?.ToString() : null,
+                SaveTime: TryReadUnix(raw, "_save_time") ?? TryReadUnix(raw, "_ctime"),
+                RenpyVersion: FormatVersion(raw),
+                GameName: raw.TryGetValue("_game_name", out var g) ? g?.ToString() : null,
+                Raw: raw);
+        }
+        catch (JsonException ex)
+        {
+            Log.Warn(ex, "Save-JSON-Metadaten unlesbar");
+            return new SaveMetadata(null, null, null, null,
+                new Dictionary<string, object?>());
+        }
+    }
+
+    private static string? FormatVersion(IDictionary<string, object?> raw)
+    {
+        if (!raw.TryGetValue("_renpy_version", out var v) || v is null) return null;
+        // Ren'Py 8 speichert die Version als List [major, minor, patch, build].
+        if (v is IEnumerable<object?> list && v is not string)
+            return string.Join(".", list.Select(x => x?.ToString() ?? ""));
+        return v.ToString();
+    }
+
+    private static DateTimeOffset? TryReadUnix(IDictionary<string, object?> raw, string key)
+    {
+        if (!raw.TryGetValue(key, out var val) || val is null) return null;
+        try
+        {
+            double seconds = Convert.ToDouble(val, CultureInfo.InvariantCulture);
+            return DateTimeOffset.FromUnixTimeSeconds((long)seconds).ToLocalTime();
+        }
+        catch { return null; }
+    }
+
+    private static object? JsonToObject(JsonElement el) => el.ValueKind switch
+    {
+        JsonValueKind.String => el.GetString(),
+        JsonValueKind.Number => el.TryGetInt64(out var i) ? i : el.GetDouble(),
+        JsonValueKind.True => true,
+        JsonValueKind.False => false,
+        JsonValueKind.Null => null,
+        JsonValueKind.Array => el.EnumerateArray().Select(JsonToObject).ToList(),
+        JsonValueKind.Object => el.EnumerateObject().ToDictionary(p => p.Name, p => JsonToObject(p.Value)),
+        _ => el.ToString(),
+    };
+
+    // ---- Log entpicklen ----------------------------------------------------
+
+    private static object? ReadLog(ZipArchive zip)
+    {
+        byte[] logBytes = ReadEntryBytes(zip, "log")
+            ?? throw new InvalidDataException("Save enthält keinen 'log'-Eintrag.");
+
+        // Ältere Ren'Py-Versionen zlib-komprimieren den Log (beginnt mit 0x78),
+        // neuere schreiben rohes Pickle (0x80 = Protocol-Marker).
+        byte[] pickle = logBytes.Length > 0 && logBytes[0] == 0x78
+            ? ZlibDecompress(logBytes) : logBytes;
+
+        using var u = new Unpickler();
+        return u.loads(pickle);
+    }
+
+    // ---- Store-Extraktion --------------------------------------------------
+
+    /// <summary>Sucht die Store-Variablen im entpickleten Log. Ren'Py 8.x:
+    /// Top-Level ist ein Tupel <c>(roots, log)</c>, <c>roots</c> ist ein Dict
+    /// mit voll qualifizierten Keys (<c>store.foo</c>, <c>persistent.bar</c>).
+    /// Ältere Formate mit verschachteltem Namespace-Wrapper werden ebenfalls
+    /// unterstützt.</summary>
+    private static IReadOnlyList<SaveVariable> ExtractVariables(object? logRoot)
+    {
+        if (logRoot is not object?[] { Length: >= 1 } arr) return [];
+        if (arr[0] is not IDictionary roots) return [];
+
+        // Fall 1 (Ren'Py 8.x): roots enthält "store.foo"-Keys direkt.
+        var flat = new List<SaveVariable>();
+        bool hasQualifiedKeys = false;
+        foreach (DictionaryEntry de in roots)
+        {
+            if (de.Key is not string key) continue;
+            if (key.StartsWith("store.", StringComparison.Ordinal))
+            {
+                hasQualifiedKeys = true;
+                string name = key["store.".Length..];
+                flat.Add(new SaveVariable(name, TypeDisplayName(de.Value),
+                    ValueDisplay(de.Value), name.StartsWith('_')));
+            }
+        }
+        if (hasQualifiedKeys)
+        {
+            flat.Sort(static (a, b) => string.CompareOrdinal(a.Name, b.Name));
+            return flat;
+        }
+
+        // Fall 2 (ältere Formate): roots["store"] ist selbst ein Dict.
+        if (roots.Contains("store") && roots["store"] is IDictionary storeDict)
+            return DictToVariables(storeDict);
+
+        // Fall 3: roots IST direkt der Store (sehr alte Formate).
+        return DictToVariables(roots);
+    }
+
+    private static IReadOnlyList<SaveVariable> DictToVariables(IDictionary d)
+    {
+        var result = new List<SaveVariable>(d.Count);
+        foreach (DictionaryEntry de in d)
+        {
+            string key = de.Key?.ToString() ?? "";
+            result.Add(new SaveVariable(key, TypeDisplayName(de.Value),
+                ValueDisplay(de.Value), key.StartsWith('_')));
+        }
+        result.Sort(static (a, b) => string.CompareOrdinal(a.Name, b.Name));
+        return result;
+    }
+
+    private static string TypeDisplayName(object? v) => v switch
+    {
+        null => "None",
+        string => "str",
+        bool => "bool",
+        int or long or short or byte or sbyte or uint or ulong or ushort => "int",
+        double or float or decimal => "float",
+        ClassDict cd => ShortName(cd.ClassName),
+        IDictionary => "dict",
+        object?[] => "tuple",
+        ArrayList => "list",
+        IList => "list",
+        _ => ShortName(v.GetType().Name),
+    };
+
+    private static string ShortName(string qualified)
+    {
+        int dot = qualified.LastIndexOf('.');
+        return dot >= 0 ? qualified[(dot + 1)..] : qualified;
+    }
+
+    private static string ValueDisplay(object? v)
+    {
+        const int max = 200;
+        // Listen/Dicts/Tuples deren Inhalt "einfach editierbar" ist (nur
+        // Skalare + verschachtelte einfach-editierbare Container), zeigen
+        // wir als Python-Literal — der User kann sie im Save-Editor direkt
+        // im Text-Feld editieren. Sonst Fallback auf "[N Elemente]".
+        if (v is IDictionary or IList or object?[] && IsSimplyEditable(v))
+        {
+            var lit = PythonLiteral.Format(v);
+            return lit.Length > max ? lit[..max] + "…" : lit;
+        }
+        string s = v switch
+        {
+            null => "None",
+            string str => str,
+            bool b => b ? "True" : "False",
+            ClassDict cd => $"<{cd.ClassName}>",
+            IDictionary d => $"{{{d.Count} Einträge}}",
+            object?[] arr => $"({arr.Length} Elemente)",
+            ArrayList al => $"[{al.Count} Elemente]",
+            IList il => $"[{il.Count} Elemente]",
+            IFormattable f => f.ToString(null, CultureInfo.InvariantCulture),
+            _ => v.ToString() ?? "",
+        };
+        return s.Length > max ? s[..max] + "…" : s;
+    }
+
+    /// <summary>Prueft rekursiv, ob ein Wert komplett aus einfach editier-
+    /// baren Typen besteht (null, bool, int, float, string) — direkt oder
+    /// in flachen/verschachtelten Listen/Dicts/Tuples. ClassDict-Objekte
+    /// (Opaque-Ren'Py-Klassen) machen den Wert nicht editierbar.</summary>
+    public static bool IsSimplyEditable(object? v)
+    {
+        switch (v)
+        {
+            case null:
+            case bool:
+            case string:
+            case int or long or short or byte:
+            case double or float:
+                return true;
+            case ClassDict:
+                return false;
+            case IDictionary dict:
+                foreach (DictionaryEntry e in dict)
+                {
+                    if (!IsSimplyEditable(e.Key)) return false;
+                    if (!IsSimplyEditable(e.Value)) return false;
+                }
+                return true;
+            case object?[] tuple:
+                foreach (var it in tuple)
+                    if (!IsSimplyEditable(it)) return false;
+                return true;
+            case IList list:
+                foreach (var it in list)
+                    if (!IsSimplyEditable(it)) return false;
+                return true;
+            default:
+                return false;
+        }
+    }
+
+    // ---- Zip-Helfer --------------------------------------------------------
+
+    private static byte[]? ReadEntryBytes(ZipArchive zip, string name)
+    {
+        var entry = zip.GetEntry(name);
+        if (entry is null) return null;
+        using var stream = entry.Open();
+        using var ms = new MemoryStream();
+        stream.CopyTo(ms);
+        return ms.ToArray();
+    }
+
+    private static byte[] ZlibDecompress(byte[] data)
+    {
+        using var input = new MemoryStream(data);
+        using var z = new ZLibStream(input, CompressionMode.Decompress);
+        using var output = new MemoryStream();
+        z.CopyTo(output);
+        return output.ToArray();
+    }
+
+    // ---- Razorvine.Pickle-Erweiterung: Catch-all für unbekannte Klassen ----
+
+    /// <summary>Statischer Einmal-Setup: patcht die interne
+    /// <c>Unpickler.objectConstructors</c>-Map mit einem <see cref="CatchAllDict"/>-
+    /// Wrapper, sodass jede unbekannte Klasse einen tolerantten Passthrough-
+    /// Constructor bekommt (statt <see cref="PickleException"/>). Registriert
+    /// zusätzlich echte Container für <c>RevertableDict/List/Set</c>, weil diese
+    /// per <c>__reduce__</c>+APPENDS/SETITEMS aufgebaut werden.
+    ///
+    /// Das readonly-Statik-Feld wird per <see cref="UnsafeAccessor"/> ersetzt
+    /// (.NET 8+); anders geht es nicht ohne Razorvine zu forken.</summary>
+    private static void EnsureInitialized()
+    {
+        if (Interlocked.Exchange(ref _initDone, 1) == 1) return;
+
+        ref var slot = ref Accessors.ObjectConstructors();
+        slot = new CatchAllDict(slot);
+
+        foreach (string mod in new[] { "renpy.revertable", "renpy.python" })
+        {
+            Unpickler.registerConstructor(mod, "RevertableDict", new RevertableDictCtor());
+            Unpickler.registerConstructor(mod, "RevertableList", new RevertableListCtor());
+            Unpickler.registerConstructor(mod, "RevertableSet",  new RevertableListCtor());
+        }
+
+        // OrderedDict: Insertion-Order muss erhalten bleiben (Signature.parameters
+        // ist ein OrderedDict — bei Verlust der Reihenfolge landet z. B. ein
+        // Screen-Parameter ohne Default hinter einem mit Default, was Ren'Py
+        // mit "non-default parameter X follows a default parameter" ablehnt).
+        // .NET Dictionary<K,V> behält seit .NET Core insertion order.
+        Unpickler.registerConstructor("collections", "OrderedDict", new OrderedDictCtor());
+
+        // collections.defaultdict wird von Ren'Py 8.5+ fuer `deferred_parse_errors`
+        // im Screens-Pickle benutzt. Muss Hashtable sein, weil Razorvine's
+        // load_setitem/load_setitems einen expliziten (Hashtable)-Cast macht.
+        // Insertion-Order geht dabei verloren — fuer defaultdict irrelevant.
+        Unpickler.registerConstructor("collections", "defaultdict", new HashtableFallbackCtor());
+        // collections.Counter: str → int Zaehler. Auch dict-Subklasse — bei
+        // SETITEM waere sonst der Cast-Fehler drin. Ren'Py nutzt Counter u.a.
+        // in Diagnostics-Structs (proaktiv).
+        Unpickler.registerConstructor("collections", "Counter", new HashtableFallbackCtor());
+        // collections.OrderedDict Alternative-Alias in aelteren Python-Versionen:
+        // Ren'Py 8.6 hat ein neues _collections-C-Modul-Alias. Bei Aufruf
+        // durch Fremdklassen-Pickle registrieren wir denselben Ctor.
+        Unpickler.registerConstructor("_collections", "OrderedDict", new OrderedDictCtor());
+        Unpickler.registerConstructor("_collections", "defaultdict", new HashtableFallbackCtor());
+    }
+
+    /// <summary>Constructor für <c>collections.OrderedDict</c>. Python-Pickle
+    /// speichert es typischerweise als <c>(OrderedDict, ([(k,v), (k,v), …],))</c>
+    /// (Args ist eine Liste von Key/Value-Tupeln); manche Pickles nutzen
+    /// stattdessen einen leeren Ctor plus SETITEMS im BUILD-Schritt. Wir
+    /// unterstützen beide Wege — der Rückgabe-Container ist ein
+    /// <see cref="OrderedDictContainer"/>, das <see cref="IDictionary"/>
+    /// implementiert und Insertion-Order behält.</summary>
+    private sealed class OrderedDictCtor : IObjectConstructor
+    {
+        public object construct(object[] args)
+        {
+            var d = new OrderedDictContainer();
+            if (args.Length >= 1 && args[0] is IEnumerable items)
+                foreach (var it in items)
+                    if (it is object[] { Length: 2 } pair) d[pair[0]!] = pair[1];
+            return d;
+        }
+    }
+
+    /// <summary>Erzeugt ein <see cref="OpaqueHashtable"/> — genutzt fuer
+    /// dict-Subklassen (defaultdict, Counter, ...), bei denen wir keine
+    /// spezielle Semantik brauchen, aber die Hashtable-Basis fuer Razorvine's
+    /// SETITEM/SETITEMS-Handler kritisch ist.</summary>
+    private sealed class HashtableFallbackCtor : IObjectConstructor
+    {
+        public object construct(object[] args) => new OpaqueHashtable();
+    }
+
+    /// <summary><see cref="Hashtable"/>-basierter Container fuer
+    /// <c>collections.OrderedDict</c>. War frueher <see cref="Dictionary{TKey,TValue}"/>
+    /// (Insertion-Order-preservation), aber das crasht bei SETITEM
+    /// (Razorvine macht expliziten Cast auf Hashtable — siehe
+    /// tutorial-8.2/options.rpyc). Fuer Ren'Py-Zwecke ist Insertion-Order
+    /// bei OrderedDict nicht kritisch — die Signature-Order laeuft
+    /// separat ueber <see cref="PickleSignatureOrderScanner"/>.</summary>
+    private sealed class OrderedDictContainer : Hashtable
+    {
+        public void __setstate__(Hashtable state)
+        {
+            foreach (DictionaryEntry de in state) this[de.Key] = de.Value;
+        }
+        public void __setstate__(object[] state) { }
+        public void __setstate__(object state) { }
+    }
+
+    private static class Accessors
+    {
+        [UnsafeAccessor(UnsafeAccessorKind.StaticField, Name = "objectConstructors")]
+        public static extern ref IDictionary<string, IObjectConstructor> ObjectConstructors(Unpickler? _ = null);
+    }
+
+    /// <summary>Wrapper-Dictionary: liefert für unbekannte Keys immer einen
+    /// <see cref="OpaqueCtor"/> statt PickleException. Die Namensauflösung
+    /// erfolgt beim <see cref="TryGetValue"/>-Aufruf aus dem
+    /// "module.classname"-Key.</summary>
+    private sealed class CatchAllDict(IDictionary<string, IObjectConstructor> inner)
+        : IDictionary<string, IObjectConstructor>
+    {
+        public IObjectConstructor this[string key]
+        {
+            get => inner.TryGetValue(key, out var v) ? v : MakeOpaque(key);
+            set => inner[key] = value;
+        }
+        public ICollection<string> Keys => inner.Keys;
+        public ICollection<IObjectConstructor> Values => inner.Values;
+        public int Count => inner.Count;
+        public bool IsReadOnly => inner.IsReadOnly;
+        public void Add(string k, IObjectConstructor v) => inner.Add(k, v);
+        public void Add(KeyValuePair<string, IObjectConstructor> item) => inner.Add(item);
+        public void Clear() => inner.Clear();
+        public bool Contains(KeyValuePair<string, IObjectConstructor> item) => inner.Contains(item);
+        public bool ContainsKey(string key) => true;
+        public void CopyTo(KeyValuePair<string, IObjectConstructor>[] a, int i) => inner.CopyTo(a, i);
+        public IEnumerator<KeyValuePair<string, IObjectConstructor>> GetEnumerator() => inner.GetEnumerator();
+        public bool Remove(string key) => inner.Remove(key);
+        public bool Remove(KeyValuePair<string, IObjectConstructor> item) => inner.Remove(item);
+        public bool TryGetValue(string key, out IObjectConstructor value)
+        {
+            if (inner.TryGetValue(key, out value!)) return true;
+            value = MakeOpaque(key);
+            return true;
+        }
+        IEnumerator IEnumerable.GetEnumerator() => inner.GetEnumerator();
+
+        private static IObjectConstructor MakeOpaque(string qualifiedKey)
+        {
+            int dot = qualifiedKey.LastIndexOf('.');
+            var mod = dot > 0 ? qualifiedKey[..dot] : "";
+            var cls = dot > 0 ? qualifiedKey[(dot + 1)..] : qualifiedKey;
+            // Robustness-Heuristik: unbekannte Klasse mit dict-artigem Namen
+            // (endet auf "Dict"/"dict" oder heisst "Counter") → Hashtable-basiert.
+            // Sonst crasht Razorvine's load_setitem beim expliziten (Hashtable)-
+            // Cast. Beispiele die dadurch abgefangen werden: neue Ren'Py-8.6+-
+            // Klassen die wir noch nicht kennen aber dict-Semantik haben.
+            if (LooksLikeDictSubclass(cls))
+                return new HashtableFallbackCtor();
+            return new OpaqueCtor(mod, cls);
+        }
+
+        private static bool LooksLikeDictSubclass(string className) =>
+            className.EndsWith("Dict", StringComparison.Ordinal)
+            || className.EndsWith("dict", StringComparison.Ordinal)
+            || className == "Counter";
+    }
+
+    /// <summary>Constructor für unbekannte Klassen: erzeugt ein
+    /// <see cref="RenpyOpaqueDict"/> mit multi-signature <c>__setstate__</c>.</summary>
+    private sealed class OpaqueCtor(string module, string name) : IObjectConstructor
+    {
+        public object construct(object[] args) => new RenpyOpaqueDict(module, name, args);
+    }
+
+    /// <summary><see cref="ClassDict"/>-Ableger, der SOWOHL <c>Hashtable</c>- als auch
+    /// <c>object[]</c>- und <c>object</c>-States entgegennimmt. Nötig, weil viele
+    /// Ren'Py-Klassen ihren State als Tuple statt Dict serialisieren und der
+    /// Standard-<see cref="ClassDict"/> dann per Reflection kein passendes
+    /// <c>__setstate__</c> findet.</summary>
+    private sealed class RenpyOpaqueDict : ClassDict
+    {
+        public RenpyOpaqueDict(string module, string name, object[] args) : base(module, name)
+        {
+            if (args.Length > 0) this["__args__"] = args;
+        }
+        public new void __setstate__(Hashtable state) => base.__setstate__(state);
+
+        /// <summary>Ren'Py-AST-Nodes serialisieren ihren State als Tuple
+        /// <c>(slots, __dict__)</c> (Python-Standard aus <c>object.__reduce_ex__</c>
+        /// bei Klassen mit <c>__slots__ = ()</c>). Wir extrahieren das
+        /// eingebettete Dict und übernehmen die Felder direkt in dieses ClassDict,
+        /// damit sie per Key erreichbar sind (z. B. <c>node["filename"]</c>).</summary>
+        public void __setstate__(object[] state)
+        {
+            if (state.Length == 2 && state[1] is IDictionary dict)
+            {
+                foreach (DictionaryEntry de in dict)
+                    if (de.Key is string s) this[s] = de.Value;
+                if (state[0] is not null) this["__slots__"] = state[0];
+            }
+            else
+            {
+                this["__state__"] = state;
+            }
+        }
+
+        public void __setstate__(object state) { this["__state__"] = state; }
+    }
+
+    private sealed class RevertableDictCtor : IObjectConstructor
+    {
+        public object construct(object[] args)
+        {
+            var d = new OpaqueHashtable();
+            // RevertableDict.__reduce_ex__ liefert typischerweise (list_of_items,).
+            if (args.Length >= 1 && args[0] is IList items)
+                foreach (var item in items)
+                    if (item is object[] { Length: 2 } pair && pair[0] is not null)
+                        d[pair[0]] = pair[1];
+            return d;
+        }
+    }
+
+    private sealed class RevertableListCtor : IObjectConstructor
+    {
+        public object construct(object[] args)
+        {
+            var l = new OpaqueArrayList();
+            if (args.Length >= 1 && args[0] is IEnumerable src && args[0] is not string)
+                foreach (var i in src) l.Add(i);
+            return l;
+        }
+    }
+
+    /// <summary><see cref="Hashtable"/>-Ableger mit tolerantem <c>__setstate__</c>
+    /// (Hashtable/object[]/object) — sonst schluckt Razorvine bei BUILD.</summary>
+    private sealed class OpaqueHashtable : Hashtable
+    {
+        public void __setstate__(Hashtable state)
+        {
+            foreach (DictionaryEntry de in state) this[de.Key] = de.Value;
+        }
+        public void __setstate__(object[] state) { }
+        public void __setstate__(object state) { }
+    }
+
+    /// <summary><see cref="ArrayList"/>-Ableger mit tolerantem <c>__setstate__</c>
+    /// (analog <see cref="OpaqueHashtable"/>).</summary>
+    private sealed class OpaqueArrayList : ArrayList
+    {
+        public void __setstate__(Hashtable state) { }
+        public void __setstate__(object[] state) { }
+        public void __setstate__(object state) { }
+    }
+}
