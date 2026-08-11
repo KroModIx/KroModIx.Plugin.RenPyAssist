@@ -95,7 +95,7 @@ public sealed class CoverCache
             if (converted is null && IsAvif(bytes))
             {
                 Log.Debug("ImageSharp konnte AVIF nicht dekodieren, versuche ffmpeg-Fallback");
-                converted = await TryConvertAvifWithFfmpegAsync(bytes, ct);
+                converted = await TryConvertWithFfmpegAsync(bytes, ".avif", ct);
             }
             if (converted is not null)
             {
@@ -106,6 +106,18 @@ public sealed class CoverCache
                 Log.Warn("AVIF/WebP-Decode fehlgeschlagen — Cover nicht cachbar: {Url}", coverUrl);
                 return null;
             }
+        }
+        // Animierte GIFs (v0.8.2): manche f95zone-Cover sind animierte GIFs
+        // mit 10+ MB. Avalonia's Bitmap-Ctor kann sie nicht dekodieren, und
+        // sie fressen RAM. Erstes Frame via ffmpeg extrahieren → PNG,
+        // deutlich kleiner + Avalonia-safe. Statische GIFs (< 500 KB)
+        // reichen wir durch — Avalonia's Bitmap kommt mit denen klar.
+        else if (IsGif(bytes) && bytes.Length > 500 * 1024)
+        {
+            Log.Debug("Grosses GIF ({KB} KB) — first-frame-Convert via ffmpeg", bytes.Length / 1024);
+            var converted = await TryConvertWithFfmpegAsync(bytes, ".gif", ct);
+            if (converted is not null) bytes = converted;
+            // Fallback: Original-GIF durchreichen — Bitmap-Ctor entscheidet
         }
 
         if (!IsValidImage(bytes))
@@ -128,20 +140,22 @@ public sealed class CoverCache
         }
     }
 
-    /// <summary>AVIF → PNG via ffmpeg (falls installiert). ImageSharp 3.x
-    /// kann kein AVIF, RenPack nutzt genau diesen Fallback erfolgreich.
+    /// <summary>Konvertiert Bild-Bytes zu PNG via ffmpeg (falls installiert).
+    /// Nutze das für AVIF (ImageSharp 3.x kann kein AVIF, 4.x ist kommerziell)
+    /// und für animierte GIFs (Avalonia's Bitmap-Ctor kann keine großen GIFs).
+    /// Bei GIF wird nur das erste Frame extrahiert (<c>-vframes 1</c>).
     /// Umweg über zwei Temp-Files statt stdin/stdout-Pipe: bei letzterer
     /// gab's im .NET-Pipe-Wrapper partial-Write-Bugs bei ~300 KB Files.
     /// Auf Linux (Bazzite/Fedora) ist ffmpeg praktisch immer da; auf
     /// Windows muss der User es installieren (choco/winget). Bei fehlendem
     /// ffmpeg: return null, kein Crash.</summary>
-    private static async Task<byte[]?> TryConvertAvifWithFfmpegAsync(byte[] avifBytes, CancellationToken ct)
+    private static async Task<byte[]?> TryConvertWithFfmpegAsync(byte[] sourceBytes, string inputExt, CancellationToken ct)
     {
-        string inPath = Path.Combine(Path.GetTempPath(), $"renpyassist-avif-{Guid.NewGuid():N}.avif");
-        string outPath = Path.Combine(Path.GetTempPath(), $"renpyassist-avif-{Guid.NewGuid():N}.png");
+        string inPath = Path.Combine(Path.GetTempPath(), $"renpyassist-cover-{Guid.NewGuid():N}{inputExt}");
+        string outPath = Path.Combine(Path.GetTempPath(), $"renpyassist-cover-{Guid.NewGuid():N}.png");
         try
         {
-            await File.WriteAllBytesAsync(inPath, avifBytes, ct);
+            await File.WriteAllBytesAsync(inPath, sourceBytes, ct);
             var psi = new System.Diagnostics.ProcessStartInfo("ffmpeg")
             {
                 RedirectStandardOutput = true,
@@ -153,6 +167,11 @@ public sealed class CoverCache
             psi.ArgumentList.Add("-nostdin");
             psi.ArgumentList.Add("-loglevel"); psi.ArgumentList.Add("error");
             psi.ArgumentList.Add("-i"); psi.ArgumentList.Add(inPath);
+            // Bei animierten Formaten (GIF/APNG): nur erstes Frame extrahieren.
+            if (string.Equals(inputExt, ".gif", StringComparison.OrdinalIgnoreCase))
+            {
+                psi.ArgumentList.Add("-vframes"); psi.ArgumentList.Add("1");
+            }
             psi.ArgumentList.Add("-c:v"); psi.ArgumentList.Add("png");
             psi.ArgumentList.Add(outPath);
 
@@ -162,7 +181,8 @@ public sealed class CoverCache
             await proc.WaitForExitAsync(ct);
             if (proc.ExitCode != 0 || !File.Exists(outPath))
             {
-                Log.Warn("ffmpeg AVIF-Convert exit={Code}, stderr: {Err}", proc.ExitCode, await errTask);
+                Log.Warn("ffmpeg Cover-Convert ({Ext}) exit={Code}, stderr: {Err}",
+                    inputExt, proc.ExitCode, await errTask);
                 return null;
             }
             return await File.ReadAllBytesAsync(outPath, ct);
@@ -170,7 +190,7 @@ public sealed class CoverCache
         catch (System.ComponentModel.Win32Exception)
         {
             // ffmpeg nicht im PATH — silently, kein Cover.
-            Log.Debug("ffmpeg nicht installiert — AVIF-Cover können nicht konvertiert werden");
+            Log.Debug("ffmpeg nicht installiert — Cover ({Ext}) kann nicht konvertiert werden", inputExt);
             return null;
         }
         catch (Exception ex)
@@ -213,6 +233,14 @@ public sealed class CoverCache
         return b.Length >= 12
             && b[0] == 0x52 && b[1] == 0x49 && b[2] == 0x46 && b[3] == 0x46
             && b[8] == 0x57 && b[9] == 0x45 && b[10] == 0x42 && b[11] == 0x50;
+    }
+
+    /// <summary>GIF-Magic: <c>GIF87a</c> oder <c>GIF89a</c>.</summary>
+    private static bool IsGif(byte[] b)
+    {
+        return b.Length >= 6
+            && b[0] == 0x47 && b[1] == 0x49 && b[2] == 0x46 && b[3] == 0x38
+            && (b[4] == 0x37 || b[4] == 0x39) && b[5] == 0x61;
     }
 
     /// <summary>Prüft die ersten Bytes gegen bekannte Image-Magic-Bytes:
