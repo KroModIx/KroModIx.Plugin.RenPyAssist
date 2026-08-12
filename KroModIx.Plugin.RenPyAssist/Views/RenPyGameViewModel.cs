@@ -25,12 +25,14 @@ public sealed partial class RenPyGameViewModel : ObservableObject
     private RenPyGame _game;
 
     [ObservableProperty] private Bitmap? _cover;
-    /// <summary>v0.11: Pfad zur Original-GIF-Datei (falls Cover animiert ist).
-    /// View bindet auf GifImage.SourceUriRaw für autoplaying Loop. Bei null
+    /// <summary>v0.11 / v0.12.3: IGifSource-Instanz für Avalonia.Labs.Gif
+    /// GifImage. Source-Property erwartet IGifSource, ein simpler String-
+    /// Pfad wird stumm ignoriert (kein TypeConverter in der Lib). Bei null
     /// zeigt die View das statische Bitmap-Cover.</summary>
-    [ObservableProperty] private string? _animatedCoverPath;
-    public bool HasAnimatedCover => !string.IsNullOrEmpty(AnimatedCoverPath);
-    partial void OnAnimatedCoverPathChanged(string? value) => OnPropertyChanged(nameof(HasAnimatedCover));
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasAnimatedCover))]
+    private Avalonia.Labs.Gif.IGifSource? _animatedCoverSource;
+    public bool HasAnimatedCover => AnimatedCoverSource is not null;
     [ObservableProperty] private string _descriptionText = "";
     [ObservableProperty] private bool _isTranslating;
     [ObservableProperty] private string _translationHint = "";
@@ -128,18 +130,32 @@ public sealed partial class RenPyGameViewModel : ObservableObject
         // Detail-View zeigt immer das volle Cover (nicht den Sidebar-Ausschnitt)
         TrySetCoverFromFile(path);
 
-        // v0.11: bei animiertem GIF-Cover den Original-Pfad an die View
-        // durchreichen — GifImage rendert loop-animiert. Wenn kein GIF
-        // (statisches Cover) → null, View zeigt Bitmap.
+        // v0.11: bei animiertem GIF-Cover die IGifSource-Instanz an die View
+        // durchreichen — Avalonia.Labs.Gif GifImage rendert loop-animiert.
+        // Wenn kein GIF (statisches Cover) → null, View zeigt Bitmap.
         // v0.12.2: wenn nur der Frame-konvertierte PNG im Cache liegt (nach
-        // v0.8.4-Migration ohne Original-Persist), Original nachladen —
-        // sonst bleibt die Detail-View statisch.
+        // v0.8.4-Migration ohne Original-Persist), Original nachladen.
+        // v0.12.3: GifImage.Source erwartet IGifSource, nicht String —
+        // GifStreamSource.FromStream() wrappen. Off-UI weil der Ctor den
+        // GifDecoder synchron aufmacht (bei 13 MB GIF spuerbar).
         var url = _game.CoverUrl ?? "";
         var animated = _covers.TryGetAnimatedOriginal(url);
         if (animated is null && url.EndsWith(".gif", StringComparison.OrdinalIgnoreCase))
             animated = await _covers.EnsureAnimatedOriginalAsync(url);
-        var animatedFinal = animated;
-        Dispatcher.UIThread.Post(() => AnimatedCoverPath = animatedFinal);
+        Avalonia.Labs.Gif.IGifSource? gifSrc = null;
+        if (animated is not null && File.Exists(animated))
+        {
+            try
+            {
+                gifSrc = await Task.Run(() =>
+                    Avalonia.Labs.Gif.GifStreamSource.FromStream(File.OpenRead(animated)));
+            }
+            catch (Exception ex)
+            {
+                _host.Logger.Debug(ex, "GifStreamSource-Ctor fehlgeschlagen: {P}", animated);
+            }
+        }
+        Dispatcher.UIThread.Post(() => AnimatedCoverSource = gifSrc);
     }
 
     private void TrySetCoverFromFile(string? path)

@@ -94,7 +94,7 @@ public sealed class RenPyGameView : UserControl
             IterationCount = Avalonia.Animation.IterationCount.Infinite,
         };
         animatedCover.Bind(Avalonia.Labs.Gif.GifImage.SourceProperty,
-            new Binding(nameof(RenPyGameViewModel.AnimatedCoverPath)));
+            new Binding(nameof(RenPyGameViewModel.AnimatedCoverSource)));
         animatedCover.Bind(Control.IsVisibleProperty,
             new Binding(nameof(RenPyGameViewModel.HasAnimatedCover)));
 
