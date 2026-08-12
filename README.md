@@ -21,11 +21,17 @@ Unterordnern; das Plugin
 - installiert Update-ZIPs in einen neuen Sub-Ordner neben dem alten,
   **kopiert die Save-Games** aus `game/saves/` automatisch mit,
   löscht den alten Sub-Ordner und archiviert die ZIP in `archive/`,
-- bietet einen **RPA-Archive-Browser** + **Save-Editor** und einen
-  **Inline-Video-Player** (ffmpeg-MJPEG-Stream, kein LibVLC),
+- bietet einen **RPA-Archive-Browser** + **Save-Editor** mit
+  **Screenshot-Timeline** (chronologische Thumbnail-Leiste, Klick
+  selektiert den Save) und einen **Inline-Video-Player** (ffmpeg-MJPEG-
+  Stream, kein LibVLC),
+- rendert **animierte GIF-Cover** in der Detail-View via
+  `Avalonia.Labs.Gif` (Sidebar-Kachel bleibt Standbild),
 - führt eine **KrosteMod-Pipeline** aus, die aus dekompilierten `.rpy`-
   Dateien fertige Walkthrough-/Cheat-/Rename-Mods baut und ins `game/`
-  deployt.
+  deployt — mit **Choice-Auto-Expand** (if-Conditions als Requirements
+  im Walkthrough-Hint) und **Konditional-Cheat-Markierung** (🔓 für
+  Store-Vars die Choices freischalten).
 
 ## Aktivierung im Host
 
