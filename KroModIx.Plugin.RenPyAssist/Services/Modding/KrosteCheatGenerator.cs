@@ -122,9 +122,22 @@ public sealed class KrosteCheatGenerator
 
     /// <summary>Filtert die interessanten Cheat-Kandidaten aus der Analyse.
     /// Kriterium: int/float/bool-Typ + tatsaechlich in Choice-Delta oder
-    /// Consumer verwendet. Sortiert nach Score (Deltas x2 + Consumers).</summary>
+    /// Consumer verwendet. Sortiert nach Score (Deltas x2 + Consumers).
+    ///
+    /// <para>v0.12: Kandidaten die als Choice-Gate wirken (in einer
+    /// <c>"text" if var:</c>-Condition erscheinen) bekommen
+    /// <see cref="CheatCandidate.IsGate"/> = true — der Cheat-Screen
+    /// markiert sie visuell mit 🔓, sodass der User sofort sieht welche
+    /// Vars „Choices freischalten" (Konditional-Cheats).</para></summary>
     public static IReadOnlyList<CheatCandidate> SelectCheatCandidates(ModAnalysis analysis)
     {
+        // Set aller Vars die als Choice-Gate wirken — fuer IsGate-Flag.
+        var gateVars = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var (name, consumers) in analysis.VariableConsumers)
+        {
+            if (consumers.Any(c => c.Kind == VarConsumerKind.MenuChoiceGate))
+                gateVars.Add(name);
+        }
         var storeByName = analysis.StoreVariables
             .GroupBy(v => v.Name, StringComparer.Ordinal)
             .ToDictionary(g => g.Key, g => g.First(), StringComparer.Ordinal);
@@ -197,7 +210,8 @@ public sealed class KrosteCheatGenerator
             .ThenByDescending(x => x.score)
             .ThenBy(x => x.name, StringComparer.Ordinal)
             .Take(MaxCheatVars)
-            .Select(x => new CheatCandidate(x.name, x.kind, x.defaultValue))
+            .Select(x => new CheatCandidate(x.name, x.kind, x.defaultValue,
+                IsGate: gateVars.Contains(x.name)))
             .ToList();
     }
 
@@ -224,12 +238,15 @@ public sealed class KrosteCheatGenerator
         sb.AppendLine("# KrosteMod — Cheat Menu");
         sb.AppendLine("# Automatisch erzeugt von RenPack. Druecke F11 im Spiel um das");
         sb.AppendLine($"# Cheat-Menu zu oeffnen — {count} Story-Variable(n) zum Manipulieren.");
+        sb.AppendLine("# Vars mit dem \\U0001f513-Symbol schalten Choices in menu-Blocks frei");
+        sb.AppendLine("# (Konditional-Cheats, v0.12+).");
         sb.AppendLine("# =====================================================================");
         sb.AppendLine();
     }
 
-    /// <summary>Emittiert die Vars-Tabelle als Python-Liste von 3-Tupeln
-    /// <c>(name, kind, default_value)</c>. Der Screen iteriert darueber.</summary>
+    /// <summary>Emittiert die Vars-Tabelle als Python-Liste von 4-Tupeln
+    /// <c>(name, kind, default_value, is_gate)</c>. Der Screen iteriert
+    /// darueber; is_gate=True fuegt das 🔓-Symbol vor dem Namen an.</summary>
     private static void WriteCheatData(StringBuilder sb, IReadOnlyList<CheatCandidate> vars)
     {
         sb.AppendLine("init 985 python:");
@@ -242,6 +259,8 @@ public sealed class KrosteCheatGenerator
             sb.Append(PyStr(v.Kind));
             sb.Append(", ");
             sb.Append(PyDefault(v));
+            sb.Append(", ");
+            sb.Append(v.IsGate ? "True" : "False");
             sb.AppendLine("),");
         }
         sb.AppendLine("    ]");
@@ -249,12 +268,12 @@ public sealed class KrosteCheatGenerator
     }
 
     /// <summary>Emittiert die Gruppen-Tabelle als Python-Liste von
-    /// 2-Tupeln <c>(group_label, [(name, kind, default), ...])</c>. Bei
-    /// nur einer Gruppe rendert der Screen sie ohne Section-Header
+    /// 2-Tupeln <c>(group_label, [(name, kind, default, is_gate), ...])</c>.
+    /// Bei nur einer Gruppe rendert der Screen sie ohne Section-Header
     /// (label ist leerer String). Die Entries sind identisch zu
     /// <see cref="WriteCheatData"/> — Redundanz ist Absicht, damit der
     /// Screen mit einer einzigen Iteration alles hat was er braucht
-    /// (Filter, Kind-Check, Anzeige) ohne separaten Dict-Lookup.</summary>
+    /// (Filter, Kind-Check, Anzeige, Gate-Marker) ohne separaten Dict-Lookup.</summary>
     private static void WriteGroupData(StringBuilder sb, IReadOnlyList<CheatGroup> groups)
     {
         sb.AppendLine("init 985 python:");
@@ -272,6 +291,8 @@ public sealed class KrosteCheatGenerator
                 sb.Append(PyStr(v.Kind));
                 sb.Append(", ");
                 sb.Append(PyDefault(v));
+                sb.Append(", ");
+                sb.Append(v.IsGate ? "True" : "False");
                 sb.AppendLine("),");
             }
             sb.AppendLine("        ]),");
@@ -468,10 +489,12 @@ public sealed class KrosteCheatGenerator
         sb.AppendLine("                            for entry in ce_visible:");
         sb.AppendLine("                                $ ce_name = entry[0]");
         sb.AppendLine("                                $ ce_kind = entry[1]");
+        sb.AppendLine("                                $ ce_gate = len(entry) > 3 and entry[3]");
+        sb.AppendLine("                                $ ce_label = (u'\\U0001f513 ' if ce_gate else '') + ce_name");
         sb.AppendLine("                                hbox:");
         sb.AppendLine("                                    spacing 6");
         sb.AppendLine("                                    yalign 0.5");
-        sb.AppendLine($"                                    text \"[ce_name]\" size 13 color \"{GoldHex}\" bold True xsize 260");
+        sb.AppendLine($"                                    text \"[ce_label]\" size 13 color \"{GoldHex}\" bold True xsize 260");
         sb.AppendLine("                                    text \"=\" size 13 color \"#888888\"");
         sb.AppendLine("                                    text \"[krostemod_cheat_display(ce_name)]\" size 13 color \"#8fcfff\" xsize 140");
         sb.AppendLine("                                    if ce_kind == \"bool\":");
@@ -587,8 +610,12 @@ public sealed class KrosteCheatGenerator
 }
 
 /// <summary>Ein Cheat-Kandidat — eine Store-Variable die im Cheat-Screen
-/// erscheinen soll. Kind ist eine von <c>"int" | "float" | "bool"</c>.</summary>
-public sealed record CheatCandidate(string Name, string Kind, string DefaultValue);
+/// erscheinen soll. Kind ist eine von <c>"int" | "float" | "bool"</c>.
+/// <c>IsGate</c> (v0.12): wenn true, wird die Var in mindestens einer
+/// Choice-Condition (<c>"text" if var:</c>) benutzt — der Cheat-Screen
+/// markiert sie visuell mit 🔓 ("schaltet Choices frei").</summary>
+public sealed record CheatCandidate(string Name, string Kind, string DefaultValue,
+    bool IsGate = false);
 
 /// <summary>Eine Gruppe zusammengehoriger Cheat-Kandidaten. <c>Label</c>
 /// leer = flat/„General"-Gruppe, sonst der Container-Praefix (<c>fcs</c>,

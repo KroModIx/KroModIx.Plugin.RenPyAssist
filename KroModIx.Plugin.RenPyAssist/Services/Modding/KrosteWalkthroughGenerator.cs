@@ -366,8 +366,18 @@ public sealed class KrosteWalkthroughGenerator
     /// leben beliebig viele Substitutions-Runden.</summary>
     public static string FormatHint(RpyChoice choice)
     {
-        if (choice.Deltas.Count == 0) return "";
-        var parts = new List<string>(choice.Deltas.Count);
+        var parts = new List<string>(choice.Deltas.Count + 1);
+        // v0.12: Choice-Auto-Expand — wenn die Choice eine if-Condition hat
+        // (z.B. `"Kiss" if love >= 5:`), zeigen wir sie als (K req: …)-Tag.
+        // So sieht der User im Walkthrough BEIDE Infos: was der Choice
+        // BEWIRKT (Deltas) und was er VERLANGT (Condition). Wichtig fuer
+        // Runs wo bestimmte Choices ausgegraut/versteckt sind — man weiss
+        // dann sofort welche Story-Var man drehen muss.
+        if (!string.IsNullOrWhiteSpace(choice.Condition))
+        {
+            var condShort = ShortenCondition(choice.Condition!);
+            parts.Add($"(K req: {condShort})");
+        }
         foreach (var d in choice.Deltas)
         {
             var tag = FormatDelta(d);
@@ -375,6 +385,21 @@ public sealed class KrosteWalkthroughGenerator
         }
         if (parts.Count == 0) return "";
         return "{color=" + HintColor + "}" + string.Join(' ', parts) + "{/color}";
+    }
+
+    /// <summary>Kuerzt eine Choice-Condition auf max 40 Zeichen und entfernt
+    /// die typischen Ren'Py-Boilerplate-Formen. Beispiel: <c>love &gt;= 5 and
+    /// not seen_scene_a</c> → <c>love&gt;=5 &amp; !seen_scene_a</c>.</summary>
+    private static string ShortenCondition(string cond)
+    {
+        var s = cond.Trim()
+            .Replace(" and ", " & ")
+            .Replace(" or ", " | ")
+            .Replace(" not ", " !")
+            .Replace("not ", "!");
+        // Whitespace um Vergleichsoperatoren zusammenziehen
+        s = System.Text.RegularExpressions.Regex.Replace(s, @"\s*(>=|<=|==|!=|>|<)\s*", "$1");
+        return s.Length > 40 ? s[..37] + "…" : s;
     }
 
     private static string? FormatDelta(VarDelta d)
