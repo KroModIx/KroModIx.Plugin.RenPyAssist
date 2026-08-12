@@ -69,6 +69,9 @@ public sealed class RenPyGameView : UserControl
         // --- Cover zentriert (Uniform = kein Crop, komplettes Bild wird
         //     angezeigt; MaxWidth 700, MaxHeight 700 begrenzt sehr breite
         //     Landscape-Cover damit die Seite nicht zu weit wird) ---
+        // v0.11: für animierte GIF-Cover ein GifImage-Widget (Avalonia.Labs.
+        // Gif), das autoplay-loopt. Statisches Bitmap bleibt Fallback für
+        // Nicht-GIF-Cover — der Split via HasAnimatedCover-Binding.
         var coverImage = new Image
         {
             Stretch = Stretch.Uniform,
@@ -78,6 +81,23 @@ public sealed class RenPyGameView : UserControl
             Margin = new Thickness(0, 0, 0, 20),
         };
         coverImage.Bind(Image.SourceProperty, new Binding(nameof(RenPyGameViewModel.Cover)));
+        coverImage.Bind(Image.IsVisibleProperty, new Binding(nameof(RenPyGameViewModel.HasAnimatedCover))
+        { Converter = new Avalonia.Data.Converters.FuncValueConverter<bool, bool>(v => !v) });
+
+        var animatedCover = new Avalonia.Labs.Gif.GifImage
+        {
+            Stretch = Stretch.Uniform,
+            HorizontalAlignment = HorizontalAlignment.Center,
+            MaxWidth = 700,
+            MaxHeight = 700,
+            Margin = new Thickness(0, 0, 0, 20),
+            IterationCount = Avalonia.Animation.IterationCount.Infinite,
+        };
+        animatedCover.Bind(Avalonia.Labs.Gif.GifImage.SourceProperty,
+            new Binding(nameof(RenPyGameViewModel.AnimatedCoverPath)));
+        animatedCover.Bind(Control.IsVisibleProperty,
+            new Binding(nameof(RenPyGameViewModel.HasAnimatedCover)));
+
         var coverFallback = new TextBlock
         {
             Text = "🎮", FontSize = 96,
@@ -183,7 +203,7 @@ public sealed class RenPyGameView : UserControl
             Children =
             {
                 title, updateBadge, versionInfo, subPath,
-                coverFallback, coverImage,
+                coverFallback, coverImage, animatedCover,
                 descHeader, descText, translationHint,
                 genreHeader, genrePanel,
                 noThreadHint,

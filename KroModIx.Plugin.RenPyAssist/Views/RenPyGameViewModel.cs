@@ -25,6 +25,12 @@ public sealed partial class RenPyGameViewModel : ObservableObject
     private RenPyGame _game;
 
     [ObservableProperty] private Bitmap? _cover;
+    /// <summary>v0.11: Pfad zur Original-GIF-Datei (falls Cover animiert ist).
+    /// View bindet auf GifImage.SourceUriRaw für autoplaying Loop. Bei null
+    /// zeigt die View das statische Bitmap-Cover.</summary>
+    [ObservableProperty] private string? _animatedCoverPath;
+    public bool HasAnimatedCover => !string.IsNullOrEmpty(AnimatedCoverPath);
+    partial void OnAnimatedCoverPathChanged(string? value) => OnPropertyChanged(nameof(HasAnimatedCover));
     [ObservableProperty] private string _descriptionText = "";
     [ObservableProperty] private bool _isTranslating;
     [ObservableProperty] private string _translationHint = "";
@@ -121,6 +127,12 @@ public sealed partial class RenPyGameViewModel : ObservableObject
         }
         // Detail-View zeigt immer das volle Cover (nicht den Sidebar-Ausschnitt)
         TrySetCoverFromFile(path);
+
+        // v0.11: bei animiertem GIF-Cover den Original-Pfad an die View
+        // durchreichen — GifImage.SourceUriRaw rendert loop-animiert.
+        // Wenn kein GIF (statisches Cover) → null, View zeigt Bitmap.
+        Dispatcher.UIThread.Post(() =>
+            AnimatedCoverPath = _covers.TryGetAnimatedOriginal(_game.CoverUrl ?? ""));
     }
 
     private void TrySetCoverFromFile(string? path)

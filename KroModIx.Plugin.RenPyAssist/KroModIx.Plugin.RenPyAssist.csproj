@@ -23,6 +23,8 @@
     <!-- Python-Pickle-Deserializer fuer RPA-Archive-Index + Save-Files
          (beides Ren'Py Pickle-Format). -->
     <PackageReference Include="Razorvine.Pickle" />
+    <!-- Animierte GIF-Cover in Detail-View (v0.11+). -->
+    <PackageReference Include="Avalonia.Labs.Gif" />
   </ItemGroup>
 
   <ItemGroup>

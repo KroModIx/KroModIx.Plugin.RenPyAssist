@@ -48,7 +48,25 @@ public sealed class CoverCache
     public string PathFor(string coverUrl) =>
         Path.Combine(_cacheDir, HashUrl(coverUrl) + ".img");
 
+    /// <summary>v0.11: Pfad zur Original-Datei (nicht die Frame-0-konvertierte
+    /// PNG). Für GIFs speichern wir sowohl die konvertierte PNG (Sidebar-Kachel
+    /// via Avalonia.Bitmap) als auch das Original-GIF nebenbei — die Detail-
+    /// View kann daraus via Avalonia.Labs.Gif animiert rendern.</summary>
+    public string OriginalPathFor(string coverUrl) =>
+        Path.Combine(_cacheDir, HashUrl(coverUrl) + ".orig");
+
     public bool IsCached(string coverUrl) => File.Exists(PathFor(coverUrl));
+
+    /// <summary>v0.11: liefert den Original-GIF-Pfad wenn coverUrl auf .gif
+    /// endet und die Original-Datei mit-gecacht wurde. Sonst null → die
+    /// Detail-View fällt auf statisches Bitmap zurück.</summary>
+    public string? TryGetAnimatedOriginal(string coverUrl)
+    {
+        if (string.IsNullOrEmpty(coverUrl)) return null;
+        if (!coverUrl.EndsWith(".gif", StringComparison.OrdinalIgnoreCase)) return null;
+        var orig = OriginalPathFor(coverUrl);
+        return File.Exists(orig) ? orig : null;
+    }
 
     /// <summary>Prüft ob eine GIF-Source-URL noch mit der alten v0.8.2/v0.8.3-
     /// Logik (starr Frame 0) konvertiert wurde. Wenn ja: der Container-Mirror
@@ -163,6 +181,18 @@ public sealed class CoverCache
         // reichen wir durch — Avalonia's Bitmap kommt mit denen klar.
         else if (IsGif(bytes) && bytes.Length > 500 * 1024)
         {
+            // v0.11: Original-GIF nebenher persistieren, damit die Detail-
+            // View sie animiert rendern kann (Avalonia.Labs.Gif). Sidebar-
+            // Kachel nutzt weiterhin das konvertierte Frame (Bitmap).
+            try
+            {
+                var origPath = OriginalPathFor(coverUrl);
+                var origTmp = origPath + ".tmp";
+                await File.WriteAllBytesAsync(origTmp, bytes, ct);
+                File.Move(origTmp, origPath, overwrite: true);
+            }
+            catch (Exception ex) { Log.Debug(ex, "Original-GIF-Persist fehlgeschlagen"); }
+
             Log.Debug("Grosses GIF ({KB} KB) — first-frame-Convert via ffmpeg", bytes.Length / 1024);
             var converted = await TryConvertWithFfmpegAsync(bytes, ".gif", ct);
             if (converted is not null) bytes = converted;

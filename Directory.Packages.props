@@ -11,5 +11,9 @@
     <PackageVersion Include="SixLabors.ImageSharp" Version="3.1.12" />
     <!-- Python-Pickle fuer RPA-Index + Save-Files (v0.4+). -->
     <PackageVersion Include="Razorvine.Pickle" Version="1.5.0" />
+    <!-- Animierte GIF-Cover in der Detail-View (v0.11+). Offizieller
+         Avalonia-Labs-Fork, passt zu Avalonia 12. Sidebar-Kachel bleibt
+         weiter Bitmap (repraesentatives Frame via ffmpeg-thumbnail). -->
+    <PackageVersion Include="Avalonia.Labs.Gif" Version="12.0.2" />
   </ItemGroup>
 </Project>
