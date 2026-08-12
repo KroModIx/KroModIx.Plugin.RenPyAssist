@@ -33,6 +33,10 @@ public sealed partial class SavesViewModel : ObservableObject
 
     public ObservableCollection<SaveRow> Saves { get; } = new();
     public ObservableCollection<VariableRow> Variables { get; } = new();
+    /// <summary>v0.11.1: chronologische Screenshot-Timeline (Auto→Slot1→…),
+    /// gerendert als horizontale Thumbnail-Leiste unten im Save-Editor.
+    /// Klick auf Thumbnail selektiert den Save.</summary>
+    public ObservableCollection<TimelineEntry> Timeline { get; } = new();
 
     private List<VariableRow> _allVariables = new();
 
@@ -55,6 +59,7 @@ public sealed partial class SavesViewModel : ObservableObject
     {
         Saves.Clear();
         Variables.Clear();
+        Timeline.Clear();
         Screenshot = null;
         MetadataText = null;
         var dir = SavesDir;
@@ -74,8 +79,60 @@ public sealed partial class SavesViewModel : ObservableObject
                 Saves.Add(new SaveRow(f, new FileInfo(f)));
             StatusText = $"{Saves.Count} Save(s) im Ordner {dir}";
             if (Saves.Count > 0) SelectedSave = Saves[0];
+
+            // v0.11.1: Timeline chronologisch (aelteste links → neuste rechts).
+            // Screenshot-Extraktion parallel im Hintergrund — der User sieht
+            // die Save-Liste sofort, Thumbnails plobben nach.
+            _ = LoadTimelineAsync(files);
         }
         finally { IsBusy = false; }
+    }
+
+    /// <summary>v0.11.1: extrahiert Screenshots aller Saves im Hintergrund
+    /// und baut die Timeline chronologisch auf. Fehler pro Save werden
+    /// stillschweigend ignoriert (broken save → kein Thumbnail).</summary>
+    private async Task LoadTimelineAsync(List<string> files)
+    {
+        // Chronologisch: aelteste zuerst (mtime ascending).
+        var chronological = files
+            .Select(p => new FileInfo(p))
+            .OrderBy(fi => fi.LastWriteTimeUtc)
+            .ToList();
+        // SemaphoreSlim(4) — Pickle-Deserializer ist CPU-lastig, mehr Parallelitaet
+        // hilft nix und macht die App unresponsive.
+        using var gate = new System.Threading.SemaphoreSlim(4);
+        var tasks = chronological.Select(async fi =>
+        {
+            await gate.WaitAsync();
+            try
+            {
+                var (bytes, saveTime) = await Task.Run(() =>
+                {
+                    try
+                    {
+                        var info = _saveService.Read(fi.FullName);
+                        return (info.ScreenshotBytes, info.Metadata.SaveTime);
+                    }
+                    catch { return (null, null); }
+                });
+                if (bytes is null) return (SaveRow?)null;
+                Bitmap? thumb = null;
+                try { using var s = new MemoryStream(bytes); thumb = new Bitmap(s); }
+                catch { return null; }
+                var row = Saves.FirstOrDefault(r =>
+                    string.Equals(r.FullPath, fi.FullName, StringComparison.Ordinal));
+                if (row is null || thumb is null) return null;
+                await Dispatcher.UIThread.InvokeAsync(() =>
+                {
+                    var entry = new TimelineEntry(row, thumb,
+                        saveTime?.LocalDateTime ?? fi.LastWriteTime);
+                    Timeline.Add(entry);
+                });
+                return row;
+            }
+            finally { gate.Release(); }
+        });
+        await Task.WhenAll(tasks);
     }
 
     partial void OnSelectedSaveChanged(SaveRow? value) => _ = LoadSaveAsync(value);
@@ -189,6 +246,33 @@ public sealed partial class SavesViewModel : ObservableObject
 
     [RelayCommand]
     private void OpenSavesFolder() => _host.Shell.OpenDirectory(SavesDir);
+
+    /// <summary>v0.11.1: Klick auf ein Timeline-Thumbnail selektiert den
+    /// zugehoerigen Save (das Screenshot-Bild + Variablen laden dann normal
+    /// via OnSelectedSaveChanged).</summary>
+    [RelayCommand]
+    private void SelectFromTimeline(TimelineEntry? entry)
+    {
+        if (entry is null) return;
+        SelectedSave = entry.Save;
+    }
+}
+
+/// <summary>v0.11.1: ein Eintrag in der Screenshot-Timeline. Bildet einen
+/// Save chronologisch ab (Thumbnail + Zeitstempel + Referenz auf SaveRow).</summary>
+public sealed class TimelineEntry
+{
+    public SaveRow Save { get; }
+    public Bitmap Thumbnail { get; }
+    public string TimeText { get; }
+    public string SlotName => Save.FileName;
+
+    public TimelineEntry(SaveRow save, Bitmap thumbnail, DateTime saveTime)
+    {
+        Save = save;
+        Thumbnail = thumbnail;
+        TimeText = saveTime.ToString("dd.MM. HH:mm");
+    }
 }
 
 public sealed class SaveRow

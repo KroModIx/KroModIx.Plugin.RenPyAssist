@@ -1,10 +1,13 @@
 using Avalonia;
 using Avalonia.Controls;
+using Avalonia.Controls.Primitives;
 using Avalonia.Controls.Templates;
 using Avalonia.Data;
 using Avalonia.Layout;
+using Avalonia.LogicalTree;
 using Avalonia.Markup.Xaml.MarkupExtensions;
 using Avalonia.Media;
+using Avalonia.VisualTree;
 
 namespace KroModIx.Plugin.RenPyAssist.Views;
 
@@ -144,6 +147,78 @@ public sealed class SavesView : UserControl
             return grid;
         }, true);
 
+        // v0.11.1: Screenshot-Timeline unten — chronologische Bilderleiste
+        // (aelteste links → neuste rechts). Horizontaler ScrollViewer,
+        // ItemsControl mit Thumbnails, Klick selektiert den Save.
+        var timelineItems = new ItemsControl();
+        timelineItems.Bind(ItemsControl.ItemsSourceProperty,
+            new Binding(nameof(SavesViewModel.Timeline)));
+        timelineItems.ItemsPanel = new FuncTemplate<Panel?>(() =>
+            new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6 });
+        timelineItems.ItemTemplate = new FuncDataTemplate<TimelineEntry>((entry, _) =>
+        {
+            if (entry is null) return null;
+            var thumb = new Image
+            {
+                Source = entry.Thumbnail,
+                Width = 128, Height = 72,
+                Stretch = Stretch.UniformToFill,
+                Margin = new Thickness(0, 2, 0, 2),
+            };
+            var slot = new TextBlock
+            {
+                Text = entry.SlotName,
+                FontSize = 10,
+                TextTrimming = TextTrimming.CharacterEllipsis,
+                MaxWidth = 128,
+                HorizontalAlignment = HorizontalAlignment.Center,
+            };
+            slot.Classes.Add("muted");
+            var time = new TextBlock
+            {
+                Text = entry.TimeText,
+                FontSize = 9,
+                HorizontalAlignment = HorizontalAlignment.Center,
+            };
+            time.Classes.Add("muted");
+            var stack = new StackPanel
+            {
+                Children = { thumb, slot, time },
+                Margin = new Thickness(4),
+                Cursor = new Avalonia.Input.Cursor(Avalonia.Input.StandardCursorType.Hand),
+            };
+            var wrapper = new Border
+            {
+                Padding = new Thickness(4),
+                Child = stack,
+                BorderThickness = new Thickness(2),
+                BorderBrush = Brushes.Transparent,
+                CornerRadius = new CornerRadius(4),
+            };
+            // Klick → SelectFromTimelineCommand mit dem Entry als Parameter.
+            wrapper.PointerPressed += (_, _) =>
+            {
+                if (wrapper.DataContext is TimelineEntry e &&
+                    (wrapper.FindAncestorOfType<ItemsControl>()?.DataContext is SavesViewModel vm))
+                    vm.SelectFromTimelineCommand.Execute(e);
+            };
+            return wrapper;
+        }, true);
+
+        var timelineScroll = new ScrollViewer
+        {
+            HorizontalScrollBarVisibility = ScrollBarVisibility.Auto,
+            VerticalScrollBarVisibility = ScrollBarVisibility.Disabled,
+            Content = timelineItems,
+            MaxHeight = 130,
+            Margin = new Thickness(0, 8, 0, 0),
+        };
+        timelineScroll.Bind(ScrollViewer.IsVisibleProperty,
+            new Binding(nameof(SavesViewModel.Timeline) + ".Count")
+            {
+                Converter = new Avalonia.Data.Converters.FuncValueConverter<int, bool>(n => n > 0),
+            });
+
         var right = new DockPanel
         {
             Children =
@@ -151,6 +226,7 @@ public sealed class SavesView : UserControl
                 WithDock(screenshot, Dock.Top),
                 WithDock(metadata, Dock.Top),
                 WithDock(search, Dock.Top),
+                WithDock(timelineScroll, Dock.Bottom),
                 vars,
             },
         };
