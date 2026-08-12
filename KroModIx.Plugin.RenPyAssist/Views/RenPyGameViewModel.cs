@@ -129,10 +129,17 @@ public sealed partial class RenPyGameViewModel : ObservableObject
         TrySetCoverFromFile(path);
 
         // v0.11: bei animiertem GIF-Cover den Original-Pfad an die View
-        // durchreichen — GifImage.SourceUriRaw rendert loop-animiert.
-        // Wenn kein GIF (statisches Cover) → null, View zeigt Bitmap.
-        Dispatcher.UIThread.Post(() =>
-            AnimatedCoverPath = _covers.TryGetAnimatedOriginal(_game.CoverUrl ?? ""));
+        // durchreichen — GifImage rendert loop-animiert. Wenn kein GIF
+        // (statisches Cover) → null, View zeigt Bitmap.
+        // v0.12.2: wenn nur der Frame-konvertierte PNG im Cache liegt (nach
+        // v0.8.4-Migration ohne Original-Persist), Original nachladen —
+        // sonst bleibt die Detail-View statisch.
+        var url = _game.CoverUrl ?? "";
+        var animated = _covers.TryGetAnimatedOriginal(url);
+        if (animated is null && url.EndsWith(".gif", StringComparison.OrdinalIgnoreCase))
+            animated = await _covers.EnsureAnimatedOriginalAsync(url);
+        var animatedFinal = animated;
+        Dispatcher.UIThread.Post(() => AnimatedCoverPath = animatedFinal);
     }
 
     private void TrySetCoverFromFile(string? path)

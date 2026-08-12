@@ -68,6 +68,41 @@ public sealed class CoverCache
         return File.Exists(orig) ? orig : null;
     }
 
+    /// <summary>v0.12.2: laedt nachtraeglich das Original-GIF wenn nur der
+    /// konvertierte PNG-Cache-Eintrag existiert (typisch nach v0.8.4-Migration:
+    /// damals wurde Frame-Convert gemacht, Original nicht persistiert). Ohne
+    /// diesen Nachlader zeigt die Detail-View das statische Bitmap statt der
+    /// autoplay-loopenden GifImage. Rueckgabe: Pfad zur Original-GIF oder null.
+    /// Idempotent — bei existierender .orig-Datei direkt Pfad ohne Netz.</summary>
+    public async Task<string?> EnsureAnimatedOriginalAsync(string coverUrl, CancellationToken ct = default)
+    {
+        if (string.IsNullOrEmpty(coverUrl)) return null;
+        if (!coverUrl.EndsWith(".gif", StringComparison.OrdinalIgnoreCase)) return null;
+        var orig = OriginalPathFor(coverUrl);
+        if (File.Exists(orig)) return orig;
+
+        try
+        {
+            var bytes = await _client.DownloadImageAsync(coverUrl, ct);
+            if (bytes is null || bytes.Length == 0 || !IsGif(bytes))
+            {
+                Log.Debug("EnsureAnimatedOriginal: Download lieferte kein GIF: {Url}", coverUrl);
+                return null;
+            }
+            var tmp = orig + ".tmp";
+            await File.WriteAllBytesAsync(tmp, bytes, ct);
+            File.Move(tmp, orig, overwrite: true);
+            Log.Info("Original-GIF nachtraeglich persistiert ({KB} KB): {Url}",
+                bytes.Length / 1024, coverUrl);
+            return orig;
+        }
+        catch (Exception ex)
+        {
+            Log.Debug(ex, "EnsureAnimatedOriginal fehlgeschlagen: {Url}", coverUrl);
+            return null;
+        }
+    }
+
     /// <summary>Prüft ob eine GIF-Source-URL noch mit der alten v0.8.2/v0.8.3-
     /// Logik (starr Frame 0) konvertiert wurde. Wenn ja: der Container-Mirror
     /// enthält eventuell ein leeres/blankes Bild und muss neu geholt werden.
