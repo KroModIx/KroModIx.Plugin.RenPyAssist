@@ -68,17 +68,29 @@ Einzelnes File oder ganzes Archiv extrahieren.
 Ren'Py-Save-Editor (v0.4+): pickle-basierter Save-Reader mit
 Screenshot-Preview.
 
-### Mods (KrosteMod-Pipeline)
+### Mods (KrosteMod-Pipeline + Standalone-Decompiler)
 
-Portiert aus RenPack. Plugin dekompiliert alle `.rpyc` via `unrpyc`,
-analysiert die `.rpy` und deployt einen fertigen Mod ins `game/`-Verzeichnis
-mit Uninstall-Manifest:
+Portiert aus [RenPack](https://github.com/Kroste/RenPack). Plugin
+dekompiliert `.rpyc` in-process via **`Razorvine.Pickle`**-basiertem C#-
+Decompiler (kein Python, cross-platform, Ren'Py 6.99–8.x, deckt Screens/
+ATL/Transform/LayeredImage ab). Analysiert die `.rpy` und deployt einen
+fertigen Mod ins `game/`-Verzeichnis mit Uninstall-Manifest.
 
-- **Walkthrough** — Choice-Labels annotieren
-- **Cheat** — Money/Stat-Boosts injizieren
-- **Rename** — Character-Namen umbenennen (mit Batch-Text-Prompt)
-- **Translate** — KI-Batch-Übersetzung der Dialoge (via
-  `IHostServices.Ai`, konfiguriert im Host)
+**Buttons im Mods-Tab:**
+
+- **▶ Bauen** — komplette KrosteMod-Pipeline für den gewählten Typ:
+  - **Walkthrough** — Choice-Labels annotieren
+  - **Cheat** — F11-Overlay mit Live-Editor für Store-Variablen
+  - **Rename** — Character-Namen umbenennen (mit KI-Text-Rewrite falls
+    konfiguriert)
+  - **Translate** — KI-Batch-Übersetzung der Dialoge (via
+    `IHostServices.Ai`)
+- **🔓 .rpyc dekompilieren** (v0.13) — Standalone-Decompiler auf alle
+  `.rpyc` im aktiven `game/`-Ordner, ohne KrosteMod-Build. Nutzt
+  `skipUpToDate=true` (bereits vorhandene aktuelle `.rpy` werden
+  übersprungen). Für User die Skripte lesen/modden wollen ohne einen
+  der KrosteMod-Typen zu bauen.
+- **🗑 Deinstallieren** — restauriert `.rpyc`-Backups aus dem Manifest.
 
 ### Einstellungen (plugin-global + spiel-spezifisch)
 
