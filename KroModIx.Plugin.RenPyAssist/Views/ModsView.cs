@@ -102,11 +102,25 @@ public sealed class ModsView : UserControl
         uninstallBtn.Bind(Button.CommandProperty, new Binding(nameof(ModsViewModel.UninstallCommand)));
         uninstallBtn.Bind(Button.IsEnabledProperty, new Binding(nameof(ModsViewModel.HasManifest)));
 
+        // v0.13.0 (portiert aus RenPack): Standalone-Decompile fuer alle
+        // .rpyc im game/-Ordner — ohne KrosteMod-Build. Braucht der User
+        // wenn er Skripte lesen/modden will ohne einen der 4 KrosteMod-
+        // Typen zu bauen.
+        var decompileBtn = new Button { Content = "🔓  .rpyc dekompilieren",
+            Name = "DecompileRpycsButton",
+            Padding = new Thickness(14, 6), Margin = new Thickness(8, 0, 0, 0) };
+        decompileBtn.Bind(Button.CommandProperty, new Binding(nameof(ModsViewModel.DecompileRpycsCommand)));
+        decompileBtn.Bind(Button.IsEnabledProperty, new Binding(nameof(ModsViewModel.IsBusy))
+        { Converter = new FuncValueConverter<bool, bool>(v => !v) });
+        ToolTip.SetTip(decompileBtn,
+            "Dekompiliert alle .rpyc-Dateien im aktiven game/-Ordner nach .rpy " +
+            "(portiert aus RenPack). Bereits vorhandene, aktuelle .rpy werden übersprungen.");
+
         var actionsRow = new StackPanel
         {
             Orientation = Orientation.Horizontal,
             Margin = new Thickness(0, 16, 0, 12),
-            Children = { buildBtn, uninstallBtn },
+            Children = { buildBtn, decompileBtn, uninstallBtn },
         };
 
         // Progress

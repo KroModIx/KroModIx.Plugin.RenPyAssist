@@ -25,7 +25,7 @@ public sealed class RenPyAssistPlugin : IGameModPlugin, IUpdateNotifier, IGameLa
     public PluginMetadata Metadata { get; } = new(
         Id: "kroste.renpyassist",
         DisplayName: "Ren'Py Assist",
-        Version: "0.8.3",
+        Version: "0.13.0",
         Author: "Kroste",
         Description: "Verwaltet Ren'Py-Spiele als eigenständige Sidebar-Kacheln " +
             "(Multi-Tile). Setup via Host-Wizard '🎮 Ordner mit Spielen scannen' " +
@@ -64,6 +64,7 @@ public sealed class RenPyAssistPlugin : IGameModPlugin, IUpdateNotifier, IGameLa
     private AiTranslator? _translator;
     // v0.6: Mod-Pipeline (KrosteMod aus RenPack — Walkthrough/Cheat/Rename)
     private OneClickModBuilder? _modBuilder;
+    private RpycBatchService? _rpycBatch;
     private IReadOnlyList<DetectedGame> _activatedGames = Array.Empty<DetectedGame>();
 
     public Task InitializeAsync(IHostServices host, IReadOnlyList<DetectedGame> activatedGames, CancellationToken ct)
@@ -83,6 +84,7 @@ public sealed class RenPyAssistPlugin : IGameModPlugin, IUpdateNotifier, IGameLa
         _previewService = new MediaPreviewService();
         _translator = new AiTranslator(host);
         _modBuilder = new OneClickModBuilder();
+        _rpycBatch = new RpycBatchService();
         _activatedGames = activatedGames;
 
         var cookieBlob = _sessionStore.Load();
@@ -198,13 +200,13 @@ public sealed class RenPyAssistPlugin : IGameModPlugin, IUpdateNotifier, IGameLa
             || _f95 is null || _sessionStore is null || _covers is null
             || _worker is null || _installer is null
             || _rpaService is null || _saveService is null || _previewService is null
-            || _translator is null || _modBuilder is null)
+            || _translator is null || _modBuilder is null || _rpycBatch is null)
             yield break;
 
         yield return new GameDetailTab(_registry, _covers, _translator, _host);
         yield return new ArchivesTab(_rpaService, _previewService, _registry, _host);
         yield return new SavesTab(_saveService, _registry, _host);
-        yield return new ModsTab(_modBuilder, _registry, _host);
+        yield return new ModsTab(_modBuilder, _rpycBatch, _registry, _host);
         yield return new GameSettingsTab(_registry, _settings, _f95, _sessionStore,
             _worker, _installer, _host);
     }
@@ -401,11 +403,13 @@ public sealed class RenPyAssistPlugin : IGameModPlugin, IUpdateNotifier, IGameLa
     private sealed class ModsTab : IGameTabContribution
     {
         private readonly OneClickModBuilder _builder;
+        private readonly RpycBatchService _rpycBatch;
         private readonly GamesRegistry _registry;
         private readonly IHostServices _host;
 
-        public ModsTab(OneClickModBuilder builder, GamesRegistry registry, IHostServices host)
-        { _builder = builder; _registry = registry; _host = host; }
+        public ModsTab(OneClickModBuilder builder, RpycBatchService rpycBatch,
+            GamesRegistry registry, IHostServices host)
+        { _builder = builder; _rpycBatch = rpycBatch; _registry = registry; _host = host; }
 
         public string Id => "mods";
         public string Label => "Mods";
@@ -419,7 +423,7 @@ public sealed class RenPyAssistPlugin : IGameModPlugin, IUpdateNotifier, IGameLa
             return new ModsView
             {
                 DataContext = new ModsViewModel(entry.ContainerPath, entry.ActiveSubPath,
-                    _builder, _host),
+                    _builder, _rpycBatch, _host),
             };
         }
     }

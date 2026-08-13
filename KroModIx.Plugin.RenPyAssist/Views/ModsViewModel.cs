@@ -23,6 +23,7 @@ public sealed partial class ModsViewModel : ObservableObject
     private readonly string _containerPath;
     private readonly string? _activeSubPath;
     private readonly OneClickModBuilder _builder;
+    private readonly RpycBatchService _rpycBatch;
     private readonly IHostServices _host;
 
     [ObservableProperty] private ModTypeOption? _selectedType;
@@ -50,11 +51,12 @@ public sealed partial class ModsViewModel : ObservableObject
     };
 
     public ModsViewModel(string containerPath, string? activeSubPath,
-        OneClickModBuilder builder, IHostServices host)
+        OneClickModBuilder builder, RpycBatchService rpycBatch, IHostServices host)
     {
         _containerPath = containerPath;
         _activeSubPath = activeSubPath;
         _builder = builder;
+        _rpycBatch = rpycBatch;
         _host = host;
         SelectedType = Types.First();
         RefreshManifestInfo();
@@ -206,6 +208,48 @@ public sealed partial class ModsViewModel : ObservableObject
         return Avalonia.Application.Current?.ApplicationLifetime
             is Avalonia.Controls.ApplicationLifetimes.IClassicDesktopStyleApplicationLifetime desk
             ? desk.MainWindow : null;
+    }
+
+    /// <summary>Dekompiliert alle <c>.rpyc</c> im aktiven <c>game/</c>-Ordner
+    /// (Standalone, ohne KrosteMod-Build). Portiert aus RenPack — nutzt
+    /// <see cref="RpycBatchService"/> mit Progress + skipUpToDate (kein
+    /// unnoetiges Re-Decompile beim zweiten Klick).</summary>
+    [RelayCommand]
+    private async Task DecompileRpycsAsync()
+    {
+        if (!Directory.Exists(GameDir))
+        {
+            StatusText = $"game/-Ordner nicht gefunden: {GameDir}";
+            return;
+        }
+        try
+        {
+            IsBusy = true;
+            StatusText = "Suche .rpyc-Dateien …";
+            ProgressCurrent = 0; ProgressTotal = 0; ProgressFile = "";
+            var progress = new Progress<(int done, int total, string current)>(p =>
+                Dispatcher.UIThread.Post(() =>
+                {
+                    ProgressCurrent = p.done; ProgressTotal = p.total;
+                    ProgressFile = Path.GetFileName(p.current);
+                    StatusText = $"Dekompiliere {p.done}/{p.total} …";
+                }));
+            var result = await Task.Run(() =>
+                _rpycBatch.DecompileDirectory(GameDir, progress, skipUpToDate: true));
+            StatusText = result.Failed == 0
+                ? $"✔ {result.Succeeded} dekompiliert, {result.Skipped} übersprungen (bereits aktuell)."
+                : $"⚠ {result.Succeeded} OK, {result.Failed} Fehler, {result.Skipped} übersprungen — Log prüfen.";
+            _host.Notifications.Notify(
+                $"Decompile: {result.Succeeded}/{result.Total} .rpyc → .rpy",
+                result.Failed == 0 ? NotificationLevel.Success : NotificationLevel.Warning);
+        }
+        catch (Exception ex)
+        {
+            _host.Logger.Warn(ex, "RenPy-Decompile fehlgeschlagen: {Dir}", GameDir);
+            StatusText = "Fehler: " + ex.Message;
+            _host.Notifications.Notify("Decompile-Fehler: " + ex.Message, NotificationLevel.Error);
+        }
+        finally { IsBusy = false; }
     }
 
     [RelayCommand]
