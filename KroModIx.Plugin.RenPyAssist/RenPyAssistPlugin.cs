@@ -25,10 +25,10 @@ public sealed class RenPyAssistPlugin : IGameModPlugin, IUpdateNotifier, IGameLa
     public PluginMetadata Metadata { get; } = new(
         Id: "kroste.renpyassist",
         DisplayName: "Ren'Py Assist",
-        Version: "0.14.0",
+        Version: "0.14.1",
         Author: "Kroste",
         Description: "Verwaltet Ren'Py-Spiele als eigenständige Sidebar-Kacheln " +
-            "(Multi-Tile). v0.14.0: DE+EN-Uebersetzung aller User-facing Strings. " +
+            "(Multi-Tile). v0.14.1: GIF-Cover-Guard im CoverCache — Magic-Bytes-Check auf .orig-Files vor GifStreamSource-Handoff (verhindert InvalidGifStreamException im Compositor). v0.14.0: DE+EN-Uebersetzung aller User-facing Strings. " +
             "Setup via Host-Wizard '🎮 Ordner mit Spielen scannen' " +
             "→ Host legt pro Ren'Py-Container eine Kachel mit engine=renpy an, " +
             "Plugin übernimmt. Sub-Path-Rotation für Updates, game/saves/ bleibt " +

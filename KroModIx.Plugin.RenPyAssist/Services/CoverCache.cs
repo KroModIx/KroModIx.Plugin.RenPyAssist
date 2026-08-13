@@ -59,13 +59,27 @@ public sealed class CoverCache
 
     /// <summary>v0.11: liefert den Original-GIF-Pfad wenn coverUrl auf .gif
     /// endet und die Original-Datei mit-gecacht wurde. Sonst null → die
-    /// Detail-View fällt auf statisches Bitmap zurück.</summary>
+    /// Detail-View fällt auf statisches Bitmap zurück.
+    /// <para>v0.14.1: prueft zusaetzlich die Magic-Bytes (`GIF87a`/`GIF89a`).
+    /// Ohne den Check konnte eine korrupte oder umbenannte Nicht-GIF-Datei
+    /// (Login-Wall-HTML, alter Cache vor v0.11-Persist-Validierung) an
+    /// Avalonia.Labs.Gif durchgereicht werden — der Compositor-Handler warf
+    /// dann `InvalidGifStreamException` (Rendering-Thread, kein Crash aber
+    /// Log-Spam bei jedem Frame). Ungueltige Files werden geloescht damit
+    /// der naechste Aufruf ueber Ensure sauber neu holen kann.</para></summary>
     public string? TryGetAnimatedOriginal(string coverUrl)
     {
         if (string.IsNullOrEmpty(coverUrl)) return null;
         if (!coverUrl.EndsWith(".gif", StringComparison.OrdinalIgnoreCase)) return null;
         var orig = OriginalPathFor(coverUrl);
-        return File.Exists(orig) ? orig : null;
+        if (!File.Exists(orig)) return null;
+        if (!IsGifFile(orig))
+        {
+            Log.Debug("Cached .orig ist kein gueltiges GIF — loeschen: {P}", orig);
+            try { File.Delete(orig); } catch { }
+            return null;
+        }
+        return orig;
     }
 
     /// <summary>v0.12.2: laedt nachtraeglich das Original-GIF wenn nur der
@@ -79,7 +93,14 @@ public sealed class CoverCache
         if (string.IsNullOrEmpty(coverUrl)) return null;
         if (!coverUrl.EndsWith(".gif", StringComparison.OrdinalIgnoreCase)) return null;
         var orig = OriginalPathFor(coverUrl);
-        if (File.Exists(orig)) return orig;
+        if (File.Exists(orig))
+        {
+            if (IsGifFile(orig)) return orig;
+            // v0.14.1: alte .orig-Datei ist kein GIF (Login-Wall/HTML/CDN-
+            // Redirect) — loeschen und neu holen.
+            Log.Debug("Ensure: .orig existiert aber ist kein GIF — neu holen: {P}", orig);
+            try { File.Delete(orig); } catch { }
+        }
 
         try
         {
@@ -367,6 +388,24 @@ public sealed class CoverCache
         return b.Length >= 6
             && b[0] == 0x47 && b[1] == 0x49 && b[2] == 0x46 && b[3] == 0x38
             && (b[4] == 0x37 || b[4] == 0x39) && b[5] == 0x61;
+    }
+
+    /// <summary>v0.14.1: liest nur die ersten 6 Bytes einer Datei und
+    /// prueft die GIF-Magic. Erspart uns bei jedem Detail-View-Open das
+    /// volle Einlesen (viele f95zone-Cover sind 10+ MB). Fehler beim
+    /// Oeffnen = kein GIF (return false).</summary>
+    private static bool IsGifFile(string path)
+    {
+        try
+        {
+            using var s = File.OpenRead(path);
+            Span<byte> head = stackalloc byte[6];
+            int read = s.Read(head);
+            if (read < 6) return false;
+            return head[0] == 0x47 && head[1] == 0x49 && head[2] == 0x46 && head[3] == 0x38
+                && (head[4] == 0x37 || head[4] == 0x39) && head[5] == 0x61;
+        }
+        catch { return false; }
     }
 
     /// <summary>Prüft die ersten Bytes gegen bekannte Image-Magic-Bytes:
