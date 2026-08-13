@@ -57,24 +57,22 @@ public sealed partial class RenPyGameViewModel : ObservableObject
 
     public string DisplayName => _game.DisplayName;
     public string SubPathText => string.IsNullOrEmpty(_game.ActiveSubPath)
-        ? "" : $"Sub-Path: {_game.ActiveSubPath!}";
+        ? "" : string.Format(Strings.T("status.subpath_prefix"), _game.ActiveSubPath!);
     public string VersionInfo
     {
         get
         {
             var local = _game.LocalVersion is null ? "?" : _game.LocalVersion;
             var remote = _game.LastRemoteVersion is null ? "—" : _game.LastRemoteVersion;
-            return $"lokal: {local}  ·  remote: {remote}";
+            return string.Format(Strings.T("status.version_line"), local, remote);
         }
     }
     public bool HasUpdate => _game.HasUpdate;
     public string UpdateBadgeText => _game.LastRemoteVersion is null
-        ? "↑ Update" : $"↑ {_game.LastRemoteVersion}";
+        ? Strings.T("status.update_badge")
+        : string.Format(Strings.T("status.update_badge_with_version"), _game.LastRemoteVersion);
     public bool HasThread => !string.IsNullOrWhiteSpace(_game.ThreadUrl);
-    public string NoThreadHint =>
-        "Kein f95zone-Thread verknüpft. In den Einstellungen (⚙) rechts oben " +
-        "kannst du den Thread-Link eintragen — dann erscheinen Cover, " +
-        "Beschreibung, Genre und Update-Checks automatisch.";
+    public string NoThreadHint => Strings.T("status.no_thread_hint");
 
     private void RefreshFromRegistry()
     {
@@ -178,7 +176,7 @@ public sealed partial class RenPyGameViewModel : ObservableObject
         if (string.IsNullOrWhiteSpace(raw))
         {
             DescriptionText = string.IsNullOrWhiteSpace(_game.ThreadUrl)
-                ? "" : "(Beschreibung wird beim nächsten Thread-Check geladen — 🔄 Prüfen in den Einstellungen klicken.)";
+                ? "" : Strings.T("status.desc_will_load");
             TranslationHint = "";
             return;
         }
@@ -194,11 +192,11 @@ public sealed partial class RenPyGameViewModel : ObservableObject
             && !string.IsNullOrEmpty(cached))
         {
             DescriptionText = cached;
-            TranslationHint = $"(via KI übersetzt, Cache — Original s. Einstellungen)";
+            TranslationHint = Strings.T("status.desc_translated_cached");
             return;
         }
         DescriptionText = raw;
-        TranslationHint = "(Original — KI übersetzt gerade …)";
+        TranslationHint = Strings.T("status.desc_translating");
         try
         {
             IsTranslating = true;
@@ -207,11 +205,11 @@ public sealed partial class RenPyGameViewModel : ObservableObject
             {
                 _registry.Update(_game); // Cache in Container schreiben
                 DescriptionText = translated;
-                TranslationHint = "(via KI übersetzt)";
+                TranslationHint = Strings.T("status.desc_translated");
             }
             else
             {
-                TranslationHint = "(KI nicht verfügbar oder Übersetzung leer — Original angezeigt)";
+                TranslationHint = Strings.T("status.desc_translation_unavailable");
             }
         }
         finally { IsTranslating = false; }

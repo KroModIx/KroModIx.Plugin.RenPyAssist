@@ -9,6 +9,7 @@ using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using KroModIx.Plugin.Contracts;
+using KroModIx.Plugin.RenPyAssist.Services;
 using KroModIx.Plugin.RenPyAssist.Services.Saves;
 
 namespace KroModIx.Plugin.RenPyAssist.Views;
@@ -65,7 +66,7 @@ public sealed partial class SavesViewModel : ObservableObject
         var dir = SavesDir;
         if (!Directory.Exists(dir))
         {
-            StatusText = $"saves/-Ordner nicht gefunden: {dir}";
+            StatusText = string.Format(Strings.T("status.saves_dir_missing"), dir);
             return;
         }
         try
@@ -77,7 +78,7 @@ public sealed partial class SavesViewModel : ObservableObject
                 .ToList());
             foreach (var f in files)
                 Saves.Add(new SaveRow(f, new FileInfo(f)));
-            StatusText = $"{Saves.Count} Save(s) im Ordner {dir}";
+            StatusText = string.Format(Strings.T("status.saves_count"), Saves.Count, dir);
             if (Saves.Count > 0) SelectedSave = Saves[0];
 
             // v0.11.1: Timeline chronologisch (aelteste links → neuste rechts).
@@ -147,7 +148,7 @@ public sealed partial class SavesViewModel : ObservableObject
         try
         {
             IsBusy = true;
-            StatusText = $"Lade Save: {row.FileName} …";
+            StatusText = string.Format(Strings.T("status.loading_save"), row.FileName);
             var info = await Task.Run(() => _saveService.Read(row.FullPath));
             if (info.ScreenshotBytes is not null)
                 LoadScreenshot(info.ScreenshotBytes);
@@ -158,12 +159,12 @@ public sealed partial class SavesViewModel : ObservableObject
                 .ToList();
             ApplyFilter();
             StatusText = info.LogError is null
-                ? $"{_allVariables.Count} Variable(n) editierbar"
-                : $"Log-Fehler: {info.LogError}";
+                ? string.Format(Strings.T("status.vars_editable"), _allVariables.Count)
+                : string.Format(Strings.T("status.log_error"), info.LogError);
         }
         catch (Exception ex)
         {
-            StatusText = "Lade-Fehler: " + ex.Message;
+            StatusText = string.Format(Strings.T("status.load_error"), ex.Message);
         }
         finally { IsBusy = false; }
     }
@@ -195,10 +196,11 @@ public sealed partial class SavesViewModel : ObservableObject
     {
         var m = info.Metadata;
         var lines = new List<string>();
-        if (!string.IsNullOrEmpty(m.SaveName)) lines.Add($"Slot: {m.SaveName}");
-        if (m.SaveTime is not null) lines.Add($"Zeit: {m.SaveTime:yyyy-MM-dd HH:mm:ss}");
-        if (!string.IsNullOrEmpty(m.GameName)) lines.Add($"Spiel: {m.GameName}");
-        if (!string.IsNullOrEmpty(m.RenpyVersion)) lines.Add($"Ren'Py: {m.RenpyVersion}");
+        if (!string.IsNullOrEmpty(m.SaveName)) lines.Add(string.Format(Strings.T("saves.meta.slot"), m.SaveName));
+        if (m.SaveTime is not null) lines.Add(string.Format(Strings.T("saves.meta.time"),
+            m.SaveTime.Value.ToString("yyyy-MM-dd HH:mm:ss")));
+        if (!string.IsNullOrEmpty(m.GameName)) lines.Add(string.Format(Strings.T("saves.meta.game"), m.GameName));
+        if (!string.IsNullOrEmpty(m.RenpyVersion)) lines.Add(string.Format(Strings.T("saves.meta.renpy"), m.RenpyVersion));
         return string.Join("  ·  ", lines);
     }
 
@@ -212,34 +214,33 @@ public sealed partial class SavesViewModel : ObservableObject
             if (!v.HasUnsavedChanges) continue;
             if (!PythonLiteral.TryParse(v.EditedValue, out var parsed))
             {
-                await _host.Dialogs.ShowMessageAsync("Wert ungültig",
-                    $"„{v.Name}\": „{v.EditedValue}\" ist kein gültiges Python-Literal.");
+                await _host.Dialogs.ShowMessageAsync(Strings.T("dialog.value_invalid_title"),
+                    string.Format(Strings.T("dialog.value_invalid_msg"), v.Name, v.EditedValue));
                 return;
             }
             edits.Add(new SaveEdit(v.Name, parsed));
         }
         if (edits.Count == 0)
         {
-            _host.Notifications.Notify("Keine Änderungen zum Speichern", NotificationLevel.Info);
+            _host.Notifications.Notify(Strings.T("notify.saves_no_changes"), NotificationLevel.Info);
             return;
         }
-        var ok = await _host.Dialogs.ConfirmAsync("Save überschreiben?",
-            $"{edits.Count} Variable(n) werden im Save „{SelectedSave.FileName}\" gepatched.\n" +
-            $"Ren'Py-Saves werden byte-preserving editiert — Roundtrip-safe. Trotzdem: " +
-            $"vorher Backup empfohlen.\n\nFortfahren?");
+        var ok = await _host.Dialogs.ConfirmAsync(Strings.T("dialog.save_overwrite_title"),
+            string.Format(Strings.T("dialog.save_overwrite_msg"), edits.Count, SelectedSave.FileName));
         if (!ok) return;
         try
         {
             IsBusy = true;
             await Task.Run(() => _saveService.Write(SelectedSave.FullPath, SelectedSave.FullPath, edits));
-            _host.Notifications.Notify($"{edits.Count} Änderung(en) gespeichert",
+            _host.Notifications.Notify(
+                string.Format(Strings.T("notify.saves_changes_saved"), edits.Count),
                 NotificationLevel.Success);
             foreach (var v in _allVariables) v.MarkSaved();
             await LoadSaveAsync(SelectedSave); // Refresh from disk
         }
         catch (Exception ex)
         {
-            await _host.Dialogs.ShowMessageAsync("Save-Fehler", ex.Message);
+            await _host.Dialogs.ShowMessageAsync(Strings.T("dialog.save_error_title"), ex.Message);
         }
         finally { IsBusy = false; }
     }

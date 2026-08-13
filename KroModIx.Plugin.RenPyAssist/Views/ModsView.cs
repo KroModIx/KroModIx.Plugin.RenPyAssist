@@ -6,6 +6,7 @@ using Avalonia.Data.Converters;
 using Avalonia.Layout;
 using Avalonia.Markup.Xaml.MarkupExtensions;
 using Avalonia.Media;
+using KroModIx.Plugin.RenPyAssist.Services;
 
 namespace KroModIx.Plugin.RenPyAssist.Views;
 
@@ -17,16 +18,13 @@ public sealed class ModsView : UserControl
     {
         var title = new TextBlock
         {
-            Text = "KrosteMod-Pipeline",
+            Text = Strings.T("section.krostemod_title"),
             FontSize = 18, FontWeight = FontWeight.SemiBold,
             Margin = new Thickness(0, 0, 0, 8),
         };
         var subtitle = new TextBlock
         {
-            Text = "Portiert aus RenPack (Kroste-Original). Wählt einen Typ, klick 'Bauen' — " +
-                   "das Plugin dekompiliert alle .rpyc, analysiert die Skripte, generiert den " +
-                   "Mod und deployt ihn ins game/-Verzeichnis. Original-.rpyc werden als " +
-                   ".krostemod-bak gesichert; Uninstall stellt sie wieder her.",
+            Text = Strings.T("section.krostemod_subtitle"),
             TextWrapping = TextWrapping.Wrap,
             Margin = new Thickness(0, 0, 0, 16),
         };
@@ -46,7 +44,7 @@ public sealed class ModsView : UserControl
         manifestBadge.Child = manifestText;
 
         // Mod-Typ-Liste
-        var typesLabel = new TextBlock { Text = "Mod-Typ wählen", Margin = new Thickness(0, 8, 0, 6) };
+        var typesLabel = new TextBlock { Text = Strings.T("section.mod_type"), Margin = new Thickness(0, 8, 0, 6) };
         typesLabel.Classes.Add("section-label");
         var typesList = new ListBox
         {
@@ -90,13 +88,13 @@ public sealed class ModsView : UserControl
         }, true);
 
         // Actions
-        var buildBtn = new Button { Content = "▶  Bauen", Padding = new Thickness(20, 6) };
+        var buildBtn = new Button { Content = Strings.T("btn.build"), Padding = new Thickness(20, 6) };
         buildBtn.Classes.Add("accent");
         buildBtn.Bind(Button.CommandProperty, new Binding(nameof(ModsViewModel.BuildCommand)));
         buildBtn.Bind(Button.IsEnabledProperty, new Binding(nameof(ModsViewModel.IsBusy))
         { Converter = new FuncValueConverter<bool, bool>(v => !v) });
 
-        var uninstallBtn = new Button { Content = "🗑  Deinstallieren", Padding = new Thickness(14, 6),
+        var uninstallBtn = new Button { Content = Strings.T("btn.uninstall"), Padding = new Thickness(14, 6),
             Margin = new Thickness(8, 0, 0, 0) };
         uninstallBtn.Classes.Add("danger");
         uninstallBtn.Bind(Button.CommandProperty, new Binding(nameof(ModsViewModel.UninstallCommand)));
@@ -106,15 +104,13 @@ public sealed class ModsView : UserControl
         // .rpyc im game/-Ordner — ohne KrosteMod-Build. Braucht der User
         // wenn er Skripte lesen/modden will ohne einen der 4 KrosteMod-
         // Typen zu bauen.
-        var decompileBtn = new Button { Content = "🔓  .rpyc dekompilieren",
+        var decompileBtn = new Button { Content = Strings.T("btn.decompile_rpyc"),
             Name = "DecompileRpycsButton",
             Padding = new Thickness(14, 6), Margin = new Thickness(8, 0, 0, 0) };
         decompileBtn.Bind(Button.CommandProperty, new Binding(nameof(ModsViewModel.DecompileRpycsCommand)));
         decompileBtn.Bind(Button.IsEnabledProperty, new Binding(nameof(ModsViewModel.IsBusy))
         { Converter = new FuncValueConverter<bool, bool>(v => !v) });
-        ToolTip.SetTip(decompileBtn,
-            "Dekompiliert alle .rpyc-Dateien im aktiven game/-Ordner nach .rpy " +
-            "(portiert aus RenPack). Bereits vorhandene, aktuelle .rpy werden übersprungen.");
+        ToolTip.SetTip(decompileBtn, Strings.T("tooltip.decompile_rpyc"));
 
         var actionsRow = new StackPanel
         {

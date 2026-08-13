@@ -5,6 +5,7 @@ using Avalonia.Controls;
 using Avalonia.Controls.Templates;
 using Avalonia.Layout;
 using Avalonia.Media;
+using KroModIx.Plugin.RenPyAssist.Services;
 using KroModIx.Plugin.RenPyAssist.Services.Modding;
 
 namespace KroModIx.Plugin.RenPyAssist.Views;
@@ -19,7 +20,7 @@ public sealed class TranslateSetupDialog : Window
 
     public TranslateSetupDialog(int sayCount, int uniqueTexts)
     {
-        Title = "Übersetzung einrichten";
+        Title = Strings.T("translate.title");
         Width = 480; Height = 380;
         MinWidth = 400; MinHeight = 320;
         WindowStartupLocation = WindowStartupLocation.CenterOwner;
@@ -28,15 +29,14 @@ public sealed class TranslateSetupDialog : Window
 
         var header = new TextBlock
         {
-            Text = $"🌐  Ren'Py-Spiel übersetzen",
+            Text = Strings.T("translate.header"),
             FontSize = 18, FontWeight = FontWeight.SemiBold,
             Foreground = Brushes.WhiteSmoke,
             Margin = new Thickness(16, 12, 16, 8),
         };
         var stats = new TextBlock
         {
-            Text = $"{sayCount} Dialog-Zeilen im Spiel · {uniqueTexts} eindeutige Texte " +
-                   $"(nach Dedup) → wird via KI-Batch übersetzt (30 Texte/Batch).",
+            Text = string.Format(Strings.T("translate.stats"), sayCount, uniqueTexts),
             TextWrapping = TextWrapping.Wrap,
             Foreground = Brushes.LightGray,
             FontSize = 12,
@@ -45,8 +45,7 @@ public sealed class TranslateSetupDialog : Window
 
         var timeEstimate = new TextBlock
         {
-            Text = "Zeit-Schätzung: Ollama ~5-10 s/Batch, Cloud ~2-3 s/Batch. " +
-                   "Bei 500 Says ≈ 20 Batches → 1-3 min.",
+            Text = Strings.T("translate.time_estimate"),
             TextWrapping = TextWrapping.Wrap,
             Foreground = Brushes.Gray,
             FontSize = 11,
@@ -56,7 +55,7 @@ public sealed class TranslateSetupDialog : Window
 
         var langLabel = new TextBlock
         {
-            Text = "Zielsprache",
+            Text = Strings.T("translate.target_lang"),
             FontSize = 12, FontWeight = FontWeight.SemiBold,
             Foreground = Brushes.LightGray,
             Margin = new Thickness(16, 4, 16, 4),
@@ -89,14 +88,14 @@ public sealed class TranslateSetupDialog : Window
         };
         langBox.SelectedItem = options.FirstOrDefault(o => o.Value == preselect);
 
-        var okBtn = new Button { Content = "▶  Los", Padding = new Thickness(20, 6) };
+        var okBtn = new Button { Content = Strings.T("btn.go"), Padding = new Thickness(20, 6) };
         okBtn.Classes.Add("accent");
         okBtn.Click += (_, _) =>
         {
             SelectedLanguage = (langBox.SelectedItem as LangOption)?.Value;
             Close();
         };
-        var cancelBtn = new Button { Content = "Abbrechen", Padding = new Thickness(14, 6),
+        var cancelBtn = new Button { Content = Strings.T("btn.cancel"), Padding = new Thickness(14, 6),
             Margin = new Thickness(8, 0, 0, 0) };
         cancelBtn.Click += (_, _) => { SelectedLanguage = null; Close(); };
         var footer = new StackPanel

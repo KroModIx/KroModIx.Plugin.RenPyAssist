@@ -8,6 +8,7 @@ using Avalonia.LogicalTree;
 using Avalonia.Markup.Xaml.MarkupExtensions;
 using Avalonia.Media;
 using Avalonia.VisualTree;
+using KroModIx.Plugin.RenPyAssist.Services;
 
 namespace KroModIx.Plugin.RenPyAssist.Views;
 
@@ -18,12 +19,12 @@ public sealed class SavesView : UserControl
     public SavesView()
     {
         // --- Toolbar ---
-        var refreshBtn = new Button { Content = "🔄  Refresh" };
+        var refreshBtn = new Button { Content = Strings.T("btn.refresh_short") };
         refreshBtn.Bind(Button.CommandProperty, new Binding(nameof(SavesViewModel.ScanCommand)));
-        var saveBtn = new Button { Content = "💾  Änderungen speichern" };
+        var saveBtn = new Button { Content = Strings.T("btn.save_changes") };
         saveBtn.Classes.Add("accent");
         saveBtn.Bind(Button.CommandProperty, new Binding(nameof(SavesViewModel.SaveEditsCommand)));
-        var folderBtn = new Button { Content = "📂  saves/-Ordner" };
+        var folderBtn = new Button { Content = Strings.T("btn.open_saves_folder") };
         folderBtn.Classes.Add("ghost");
         folderBtn.Bind(Button.CommandProperty, new Binding(nameof(SavesViewModel.OpenSavesFolderCommand)));
         var toolbar = new StackPanel
@@ -83,7 +84,7 @@ public sealed class SavesView : UserControl
 
         var search = new TextBox
         {
-            PlaceholderText = "Variable filtern (z. B. money, love, points) …",
+            PlaceholderText = Strings.T("placeholder.saves_filter"),
             Margin = new Thickness(0, 8, 0, 4),
         };
         search.Bind(TextBox.TextProperty, new Binding(nameof(SavesViewModel.Search))

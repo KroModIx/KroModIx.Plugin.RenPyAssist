@@ -4,6 +4,7 @@ using Avalonia.Data;
 using Avalonia.Data.Converters;
 using Avalonia.Layout;
 using Avalonia.Media;
+using KroModIx.Plugin.RenPyAssist.Services;
 
 namespace KroModIx.Plugin.RenPyAssist.Views;
 
@@ -23,20 +24,19 @@ public sealed class GameSettingsView : UserControl
         };
         gameTitle.Bind(TextBlock.TextProperty, new Binding(nameof(GameSettingsViewModel.DisplayName)));
 
-        var threadLabel = new TextBlock { Text = "f95zone-Thread-URL", Margin = new Thickness(0, 8, 0, 4) };
+        var threadLabel = new TextBlock { Text = Strings.T("section.thread_url"), Margin = new Thickness(0, 8, 0, 4) };
         threadLabel.Classes.Add("section-label");
         var threadHelp = new TextBlock
         {
-            Text = "Link zum f95zone-Thread. Wenn gesetzt: Version-Checks, Cover, " +
-                   "Beschreibung und Genre werden automatisch geladen.",
+            Text = Strings.T("section.thread_help"),
             TextWrapping = TextWrapping.Wrap,
             Margin = new Thickness(0, 0, 0, 6),
         };
         threadHelp.Classes.Add("secondary");
-        var threadBox = new TextBox { PlaceholderText = "https://f95zone.to/threads/…" };
+        var threadBox = new TextBox { PlaceholderText = Strings.T("placeholder.thread_url") };
         threadBox.Bind(TextBox.TextProperty, new Binding(nameof(GameSettingsViewModel.ThreadUrlDraft))
         { Mode = BindingMode.TwoWay });
-        var saveThreadBtn = new Button { Content = "💾  Thread speichern & prüfen",
+        var saveThreadBtn = new Button { Content = Strings.T("btn.save_thread"),
             Margin = new Thickness(0, 6, 0, 0),
             HorizontalAlignment = HorizontalAlignment.Left };
         saveThreadBtn.Classes.Add("accent");
@@ -45,31 +45,27 @@ public sealed class GameSettingsView : UserControl
         lastChecked.Classes.Add("secondary");
         lastChecked.Bind(TextBlock.TextProperty, new Binding(nameof(GameSettingsViewModel.LastCheckedText)));
 
-        var actionLabel = new TextBlock { Text = "Aktionen", Margin = new Thickness(0, 20, 0, 4) };
+        var actionLabel = new TextBlock { Text = Strings.T("section.actions"), Margin = new Thickness(0, 20, 0, 4) };
         actionLabel.Classes.Add("section-label");
-        var playBtn = new Button { Content = "▶  Start" };
+        var playBtn = new Button { Content = Strings.T("btn.start") };
         playBtn.Classes.Add("accent");
         playBtn.Bind(Button.CommandProperty, new Binding(nameof(GameSettingsViewModel.PlayCommand)));
-        var updateBtn = new Button { Content = "⬆  Update installieren" };
+        var updateBtn = new Button { Content = Strings.T("btn.install_update") };
         updateBtn.Classes.Add("accent");
         updateBtn.Bind(Button.CommandProperty, new Binding(nameof(GameSettingsViewModel.InstallUpdateCommand)));
-        var checkBtn = new Button { Content = "🔄  Prüfen" };
+        var checkBtn = new Button { Content = Strings.T("btn.check") };
         checkBtn.Bind(Button.CommandProperty, new Binding(nameof(GameSettingsViewModel.CheckNowCommand)));
-        var folderBtn = new Button { Content = "📂  Ordner" };
+        var folderBtn = new Button { Content = Strings.T("btn.open_folder") };
         folderBtn.Classes.Add("ghost");
         folderBtn.Bind(Button.CommandProperty, new Binding(nameof(GameSettingsViewModel.OpenFolderCommand)));
-        var renameBtn = new Button { Content = "✏  Ordner umbenennen" };
+        var renameBtn = new Button { Content = Strings.T("btn.rename_folder") };
         renameBtn.Classes.Add("ghost");
         renameBtn.Bind(Button.CommandProperty, new Binding(nameof(GameSettingsViewModel.RenameFolderCommand)));
-        ToolTip.SetTip(renameBtn,
-            "Benennt den Container-Ordner auf der Platte um. .renpyassist/-Metadaten " +
-            "wandern mit. Sidebar-Kachel und Detail-View werden re-keyed.");
-        var cropBtn = new Button { Content = "🖼  Sidebar-Ausschnitt wählen" };
+        ToolTip.SetTip(renameBtn, Strings.T("tooltip.rename_folder"));
+        var cropBtn = new Button { Content = Strings.T("btn.choose_sidebar_crop") };
         cropBtn.Classes.Add("ghost");
         cropBtn.Bind(Button.CommandProperty, new Binding(nameof(GameSettingsViewModel.ChooseSidebarCropCommand)));
-        ToolTip.SetTip(cropBtn,
-            "Öffnet einen Dialog mit dem Original-Cover — verschiebe den 2:3-Rahmen " +
-            "und speichere. Der Ausschnitt landet als Sidebar-Kachel.");
+        ToolTip.SetTip(cropBtn, Strings.T("tooltip.choose_crop"));
         var actionsRow = new StackPanel
         {
             Orientation = Orientation.Horizontal, Spacing = 8,
@@ -91,21 +87,21 @@ public sealed class GameSettingsView : UserControl
         // === Sektion 2: Plugin-global ===
         var globalHeader = new TextBlock
         {
-            Text = "Plugin-Einstellungen (global)",
+            Text = Strings.T("section.plugin_global_header"),
             FontSize = 16, FontWeight = FontWeight.SemiBold,
             Margin = new Thickness(0, 36, 0, 12),
         };
 
-        var dlLabel = new TextBlock { Text = "Downloads-Watch-Ordner", Margin = new Thickness(0, 0, 0, 4) };
+        var dlLabel = new TextBlock { Text = Strings.T("section.downloads_dir"), Margin = new Thickness(0, 0, 0, 4) };
         dlLabel.Classes.Add("section-label");
         var dlBox = new TextBox { Width = 500, HorizontalAlignment = HorizontalAlignment.Left };
         dlBox.Bind(TextBox.TextProperty, new Binding(nameof(GameSettingsViewModel.DownloadsDir))
         { Mode = BindingMode.TwoWay });
-        var pickDlBtn = new Button { Content = "📂  Wählen", Margin = new Thickness(8, 0, 0, 0) };
+        var pickDlBtn = new Button { Content = Strings.T("btn.pick"), Margin = new Thickness(8, 0, 0, 0) };
         pickDlBtn.Bind(Button.CommandProperty, new Binding(nameof(GameSettingsViewModel.PickDownloadsCommand)));
         var dlRow = new StackPanel { Orientation = Orientation.Horizontal, Children = { dlBox, pickDlBtn } };
 
-        var intervalLabel = new TextBlock { Text = "Update-Check-Intervall (Minuten)",
+        var intervalLabel = new TextBlock { Text = Strings.T("section.interval"),
             Margin = new Thickness(0, 16, 0, 4) };
         intervalLabel.Classes.Add("section-label");
         var intervalBox = new NumericUpDown
@@ -116,7 +112,7 @@ public sealed class GameSettingsView : UserControl
         intervalBox.Bind(NumericUpDown.ValueProperty, new Binding(nameof(GameSettingsViewModel.IntervalMinutes))
         { Mode = BindingMode.TwoWay });
 
-        var saveGlobalBtn = new Button { Content = "💾  Global-Einstellungen speichern",
+        var saveGlobalBtn = new Button { Content = Strings.T("btn.save_global"),
             Margin = new Thickness(0, 12, 0, 8),
             HorizontalAlignment = HorizontalAlignment.Left };
         saveGlobalBtn.Bind(Button.CommandProperty, new Binding(nameof(GameSettingsViewModel.SaveGlobalSettingsCommand)));
@@ -125,13 +121,12 @@ public sealed class GameSettingsView : UserControl
         globalStatus.Bind(TextBlock.TextProperty, new Binding(nameof(GameSettingsViewModel.GlobalStatus)));
 
         // f95zone-Login
-        var loginHeader = new TextBlock { Text = "f95zone-Login",
+        var loginHeader = new TextBlock { Text = Strings.T("section.f95_login"),
             FontSize = 14, FontWeight = FontWeight.SemiBold,
             Margin = new Thickness(0, 24, 0, 8) };
         var loginHelp = new TextBlock
         {
-            Text = "Login ist optional aber empfohlen für Cover-Downloads. Passwort wird " +
-                   "NIE gespeichert — nur Session-Cookies verschlüsselt via Host-Secrets.",
+            Text = Strings.T("section.f95_login_help"),
             TextWrapping = TextWrapping.Wrap,
             Margin = new Thickness(0, 0, 0, 10),
         };
@@ -139,7 +134,7 @@ public sealed class GameSettingsView : UserControl
         var userBox = new TextBox
         {
             Width = 400, HorizontalAlignment = HorizontalAlignment.Left,
-            PlaceholderText = "Username / Email",
+            PlaceholderText = Strings.T("placeholder.username"),
         };
         userBox.Bind(TextBox.TextProperty, new Binding(nameof(GameSettingsViewModel.F95Username))
         { Mode = BindingMode.TwoWay });
@@ -147,16 +142,16 @@ public sealed class GameSettingsView : UserControl
         {
             Width = 400, HorizontalAlignment = HorizontalAlignment.Left,
             PasswordChar = '•', Margin = new Thickness(0, 6, 0, 0),
-            PlaceholderText = "Passwort",
+            PlaceholderText = Strings.T("placeholder.password"),
         };
         pwBox.Bind(TextBox.TextProperty, new Binding(nameof(GameSettingsViewModel.F95Password))
         { Mode = BindingMode.TwoWay });
-        var loginBtn = new Button { Content = "🔐  Einloggen", Margin = new Thickness(0, 10, 0, 0) };
+        var loginBtn = new Button { Content = Strings.T("btn.login"), Margin = new Thickness(0, 10, 0, 0) };
         loginBtn.Classes.Add("accent");
         loginBtn.Bind(Button.CommandProperty, new Binding(nameof(GameSettingsViewModel.LoginCommand)));
         loginBtn.Bind(Button.IsEnabledProperty, new Binding(nameof(GameSettingsViewModel.IsLoggingIn))
         { Converter = new FuncValueConverter<bool, bool>(v => !v) });
-        var logoutBtn = new Button { Content = "🚪  Cookies löschen",
+        var logoutBtn = new Button { Content = Strings.T("btn.logout"),
             Margin = new Thickness(8, 10, 0, 0) };
         logoutBtn.Classes.Add("ghost");
         logoutBtn.Bind(Button.CommandProperty, new Binding(nameof(GameSettingsViewModel.LogoutCommand)));
@@ -164,7 +159,7 @@ public sealed class GameSettingsView : UserControl
         var loginStatus = new TextBlock { Margin = new Thickness(0, 8, 0, 0) };
         loginStatus.Classes.Add("muted");
         loginStatus.Bind(TextBlock.TextProperty, new Binding(nameof(GameSettingsViewModel.LoginStatus)));
-        var f95Btn = new Button { Content = "↗  f95zone.to öffnen", Margin = new Thickness(0, 12, 0, 0) };
+        var f95Btn = new Button { Content = Strings.T("btn.open_f95"), Margin = new Thickness(0, 12, 0, 0) };
         f95Btn.Classes.Add("ghost");
         f95Btn.Bind(Button.CommandProperty, new Binding(nameof(GameSettingsViewModel.OpenF95Command)));
 

@@ -6,6 +6,7 @@ using Avalonia.Layout;
 using Avalonia.Markup.Xaml.MarkupExtensions;
 using Avalonia.Media;
 using Avalonia.Media.Imaging;
+using KroModIx.Plugin.RenPyAssist.Services;
 
 namespace KroModIx.Plugin.RenPyAssist.Views;
 
@@ -111,7 +112,7 @@ public sealed class RenPyGameView : UserControl
         // --- Beschreibung (KI-übersetzt oder Original) ---
         var descHeader = new TextBlock
         {
-            Text = "Beschreibung",
+            Text = Strings.T("section.description"),
             FontSize = 14,
             FontWeight = FontWeight.SemiBold,
             HorizontalAlignment = HorizontalAlignment.Center,
@@ -142,7 +143,7 @@ public sealed class RenPyGameView : UserControl
         // --- Genre-Chips ---
         var genreHeader = new TextBlock
         {
-            Text = "Genre",
+            Text = Strings.T("section.genre"),
             FontSize = 14,
             FontWeight = FontWeight.SemiBold,
             HorizontalAlignment = HorizontalAlignment.Center,

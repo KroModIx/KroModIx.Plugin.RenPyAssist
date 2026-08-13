@@ -9,6 +9,7 @@ using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using KroModIx.Plugin.Contracts;
+using KroModIx.Plugin.RenPyAssist.Services;
 using KroModIx.Plugin.RenPyAssist.Services.Preview;
 using KroModIx.Plugin.RenPyAssist.Services.Rpa;
 
@@ -83,7 +84,7 @@ public sealed partial class ArchivesViewModel : ObservableObject
         var gameDir = GameDir;
         if (!Directory.Exists(gameDir))
         {
-            StatusText = $"game/-Ordner nicht gefunden: {gameDir}";
+            StatusText = string.Format(Strings.T("status.game_dir_missing"), gameDir);
             return;
         }
         try
@@ -95,7 +96,7 @@ public sealed partial class ArchivesViewModel : ObservableObject
                 .ToList());
             foreach (var p in rpas)
                 Archives.Add(new ArchiveRow(p, new FileInfo(p).Length));
-            StatusText = $"{Archives.Count} .rpa-Archiv(e) gefunden";
+            StatusText = string.Format(Strings.T("status.rpa_scan_result"), Archives.Count);
             if (Archives.Count > 0) SelectedArchive = Archives[0];
         }
         finally { IsBusy = false; }
@@ -111,7 +112,7 @@ public sealed partial class ArchivesViewModel : ObservableObject
         try
         {
             IsBusy = true;
-            StatusText = $"Lade Index: {row.FileName} …";
+            StatusText = string.Format(Strings.T("status.loading_index"), row.FileName);
             var info = await Task.Run(() => _archives.ReadIndex(row.FullPath));
             row.Version = info.Version.ToDisplay();
             row.EntryCount = info.Entries.Count;
@@ -119,12 +120,12 @@ public sealed partial class ArchivesViewModel : ObservableObject
             row.Archive = info;
             foreach (var e in info.Entries.Take(5000))
                 Entries.Add(new EntryRow(e));
-            StatusText = $"{info.Version.ToDisplay()} · {info.Entries.Count} Datei(en) · " +
-                $"{FormatSize(info.TotalSize)}";
+            StatusText = string.Format(Strings.T("status.index_summary"),
+                info.Version.ToDisplay(), info.Entries.Count, FormatSize(info.TotalSize));
         }
         catch (Exception ex)
         {
-            StatusText = "Index-Fehler: " + ex.Message;
+            StatusText = string.Format(Strings.T("status.index_error"), ex.Message);
         }
         finally { IsBusy = false; }
     }
@@ -159,7 +160,7 @@ public sealed partial class ArchivesViewModel : ObservableObject
             var bytes = await Task.Run(() => _archives.ReadEntryBytes(archivePath, entry, limit));
             if (bytes is null)
             {
-                PreviewInfo += " · zu groß für Preview";
+                PreviewInfo += Strings.T("status.preview_too_large");
                 return;
             }
             switch (kind)
@@ -203,13 +204,13 @@ public sealed partial class ArchivesViewModel : ObservableObject
                     _canPlayExternal = true;
                     break;
                 case PreviewKind.Binary:
-                    PreviewInfo += " · binär (kein Preview)";
+                    PreviewInfo += Strings.T("status.preview_binary");
                     break;
             }
         }
         catch (Exception ex)
         {
-            PreviewInfo += " · Fehler: " + ex.Message;
+            PreviewInfo += string.Format(Strings.T("status.preview_error"), ex.Message);
         }
         finally { IsBusy = false; }
     }
@@ -222,7 +223,7 @@ public sealed partial class ArchivesViewModel : ObservableObject
             var bmp = new Bitmap(s);
             Dispatcher.UIThread.Post(() => PreviewImage = bmp);
         }
-        catch { PreviewInfo += " · Bild-Decode fehlgeschlagen"; }
+        catch { PreviewInfo += Strings.T("status.preview_image_decode_fail"); }
     }
 
     /// <summary>v0.9: Toggle für Inline-Video-Playback. Nutzt ffmpeg-MJPEG-
@@ -292,7 +293,8 @@ public sealed partial class ArchivesViewModel : ObservableObject
         if (bytes is null) return;
         var path = _preview.OpenExternal(bytes, Path.GetExtension(SelectedEntry.Entry.Path));
         if (path is not null)
-            _host.Notifications.Notify($"Extern geöffnet: {Path.GetFileName(SelectedEntry.Entry.Path)}",
+            _host.Notifications.Notify(
+                string.Format(Strings.T("notify.extern_opened"), Path.GetFileName(SelectedEntry.Entry.Path)),
                 NotificationLevel.Info);
     }
 
@@ -300,7 +302,7 @@ public sealed partial class ArchivesViewModel : ObservableObject
     private async Task ExtractSelectedAsync()
     {
         if (SelectedEntry is null || SelectedArchive?.Archive is null) return;
-        var dir = await _host.Dialogs.PickFolderAsync("Zielordner für Extraktion");
+        var dir = await _host.Dialogs.PickFolderAsync(Strings.T("dialog.pick_folder_extract"));
         if (string.IsNullOrEmpty(dir)) return;
         try
         {
@@ -311,12 +313,12 @@ public sealed partial class ArchivesViewModel : ObservableObject
                 _archives.ExtractEntry(SelectedArchive.FullPath, SelectedEntry.Entry, target);
             });
             _host.Notifications.Notify(
-                $"Entpackt: {Path.GetFileName(SelectedEntry.Entry.Path)}",
+                string.Format(Strings.T("notify.extracted"), Path.GetFileName(SelectedEntry.Entry.Path)),
                 NotificationLevel.Success);
         }
         catch (Exception ex)
         {
-            await _host.Dialogs.ShowMessageAsync("Extract-Fehler", ex.Message);
+            await _host.Dialogs.ShowMessageAsync(Strings.T("dialog.extract_error_title"), ex.Message);
         }
         finally { IsBusy = false; }
     }
@@ -325,22 +327,23 @@ public sealed partial class ArchivesViewModel : ObservableObject
     private async Task ExtractAllAsync()
     {
         if (SelectedArchive?.Archive is null) return;
-        var dir = await _host.Dialogs.PickFolderAsync("Zielordner für gesamtes Archiv");
+        var dir = await _host.Dialogs.PickFolderAsync(Strings.T("dialog.pick_folder_extract_all"));
         if (string.IsNullOrEmpty(dir)) return;
-        var ok = await _host.Dialogs.ConfirmAsync("Alles entpacken?",
-            $"{SelectedArchive.Archive.Entries.Count} Datei(en) werden nach\n{dir}\nentpackt. Fortfahren?");
+        var ok = await _host.Dialogs.ConfirmAsync(Strings.T("dialog.extract_all_title"),
+            string.Format(Strings.T("dialog.extract_all_msg"),
+                SelectedArchive.Archive.Entries.Count, dir));
         if (!ok) return;
         try
         {
             IsBusy = true;
             var count = await Task.Run(() => _archives.ExtractAll(SelectedArchive.Archive, dir));
             _host.Notifications.Notify(
-                $"{count} Datei(en) aus {SelectedArchive.FileName} entpackt",
+                string.Format(Strings.T("notify.extracted_count"), count, SelectedArchive.FileName),
                 NotificationLevel.Success);
         }
         catch (Exception ex)
         {
-            await _host.Dialogs.ShowMessageAsync("Extract-Fehler", ex.Message);
+            await _host.Dialogs.ShowMessageAsync(Strings.T("dialog.extract_error_title"), ex.Message);
         }
         finally { IsBusy = false; }
     }
@@ -363,7 +366,7 @@ public sealed partial class ArchiveRow : ObservableObject
     [ObservableProperty] private int _entryCount;
     [ObservableProperty] private long _totalSize;
     public RpaArchiveInfo? Archive { get; set; }
-    public string Summary => $"{FileName}  ·  {Version}  ·  {EntryCount} Files";
+    public string Summary => string.Format(Strings.T("archive.summary"), FileName, Version, EntryCount);
 
     public ArchiveRow(string fullPath, long fileSize)
     {

@@ -9,6 +9,7 @@ using Avalonia.Layout;
 using Avalonia.Markup.Xaml.MarkupExtensions;
 using Avalonia.Media;
 using CommunityToolkit.Mvvm.ComponentModel;
+using KroModIx.Plugin.RenPyAssist.Services;
 using KroModIx.Plugin.RenPyAssist.Services.Modding;
 
 namespace KroModIx.Plugin.RenPyAssist.Views;
@@ -23,7 +24,7 @@ public sealed class RenameConfigDialog : Window
 
     public RenameConfigDialog(IReadOnlyList<RpyCharacter> characters)
     {
-        Title = "Character umbenennen";
+        Title = Strings.T("rename.title");
         Width = 700; Height = 500;
         MinWidth = 500; MinHeight = 350;
         WindowStartupLocation = WindowStartupLocation.CenterOwner;
@@ -34,17 +35,14 @@ public sealed class RenameConfigDialog : Window
 
         var header = new TextBlock
         {
-            Text = $"{characters.Count} Character im Spiel erkannt",
+            Text = string.Format(Strings.T("rename.header"), characters.Count),
             FontSize = 16, FontWeight = FontWeight.SemiBold,
             Foreground = Brushes.WhiteSmoke,
             Margin = new Thickness(16, 12, 16, 4),
         };
         var help = new TextBlock
         {
-            Text = "Trage neue Namen in die rechte Spalte ein. Leerer Text = keine Änderung. " +
-                   "Nach Übernehmen: Plugin schreibt Character-Objekt-Namen um und (falls Ollama/" +
-                   "Cloud konfiguriert) lässt die KI alle Body-Texte konsistent umschreiben " +
-                   "(Grammatik, Beziehungswörter).",
+            Text = Strings.T("rename.help"),
             TextWrapping = TextWrapping.Wrap,
             Foreground = Brushes.LightGray,
             Margin = new Thickness(16, 0, 16, 12),
@@ -81,7 +79,7 @@ public sealed class RenameConfigDialog : Window
             };
             var newBox = new TextBox
             {
-                PlaceholderText = "(unverändert)",
+                PlaceholderText = Strings.T("placeholder.new_name"),
                 FontSize = 12,
             };
             newBox.Bind(TextBox.TextProperty, new Binding(nameof(RenameRow.NewName))
@@ -105,7 +103,7 @@ public sealed class RenameConfigDialog : Window
 
         var okBtn = new Button
         {
-            Content = "✓  Übernehmen",
+            Content = Strings.T("btn.apply"),
             Padding = new Thickness(20, 6),
         };
         okBtn.Classes.Add("accent");
@@ -118,7 +116,7 @@ public sealed class RenameConfigDialog : Window
             Result = new RenameConfig(mappings);
             Close();
         };
-        var cancelBtn = new Button { Content = "Abbrechen", Padding = new Thickness(14, 6),
+        var cancelBtn = new Button { Content = Strings.T("btn.cancel"), Padding = new Thickness(14, 6),
             Margin = new Thickness(8, 0, 0, 0) };
         cancelBtn.Click += (_, _) => { Result = null; Close(); };
         var footer = new StackPanel

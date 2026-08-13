@@ -7,6 +7,7 @@ using Avalonia.Input;
 using Avalonia.Layout;
 using Avalonia.Media;
 using Avalonia.Media.Imaging;
+using KroModIx.Plugin.RenPyAssist.Services;
 using SixLabors.ImageSharp;
 using SixLabors.ImageSharp.Formats.Png;
 using SixLabors.ImageSharp.Processing;
@@ -51,7 +52,7 @@ public sealed class CoverCropDialog : Window
         _sourceImagePath = sourceImagePath;
         _outputPath = outputPath;
 
-        Title = "Sidebar-Kachel-Ausschnitt wählen";
+        Title = Strings.T("crop.title");
         Width = 900;
         Height = 700;
         MinWidth = 700; MinHeight = 550;
@@ -98,18 +99,17 @@ public sealed class CoverCropDialog : Window
             UpdateStatus();
         };
 
-        var saveBtn = new Button { Content = "💾  Ausschnitt speichern", Padding = new Thickness(14, 6) };
+        var saveBtn = new Button { Content = Strings.T("btn.crop_save"), Padding = new Thickness(14, 6) };
         saveBtn.Click += (_, _) => SaveCrop();
 
-        var cancelBtn = new Button { Content = "Abbrechen", Padding = new Thickness(14, 6) };
+        var cancelBtn = new Button { Content = Strings.T("btn.cancel"), Padding = new Thickness(14, 6) };
         cancelBtn.Click += (_, _) => Close();
 
         _statusText = new TextBlock { Foreground = Brushes.LightGray, FontSize = 11 };
 
         var topInfo = new TextBlock
         {
-            Text = "Verschiebe den goldenen Rahmen mit der Maus, Größe per Slider. " +
-                   "Zielformat 2:3 (Steam-Library-Portrait, 600×900).",
+            Text = Strings.T("crop.info"),
             Foreground = Brushes.LightGray,
             Margin = new Thickness(10, 10, 10, 10),
             TextWrapping = TextWrapping.Wrap,
@@ -121,7 +121,7 @@ public sealed class CoverCropDialog : Window
             Margin = new Thickness(10),
         };
         var zoomStack = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6 };
-        zoomStack.Children.Add(new TextBlock { Text = "Zoom", Foreground = Brushes.LightGray,
+        zoomStack.Children.Add(new TextBlock { Text = Strings.T("crop.zoom_label"), Foreground = Brushes.LightGray,
             VerticalAlignment = VerticalAlignment.Center });
         zoomStack.Children.Add(_zoomSlider);
         Grid.SetColumn(zoomStack, 0);
@@ -159,7 +159,7 @@ public sealed class CoverCropDialog : Window
         }
         catch (Exception ex)
         {
-            _statusText.Text = "Bild-Load fehlgeschlagen: " + ex.Message;
+            _statusText.Text = string.Format(Strings.T("crop.status_load_fail"), ex.Message);
         }
     }
 
@@ -234,7 +234,8 @@ public sealed class CoverCropDialog : Window
         int cropY = (int)((_selY - _dispOffsetY) * scale);
         int cropW = (int)(_selW * scale);
         int cropH = (int)(_selH * scale);
-        _statusText.Text = $"Ausschnitt: {cropW}×{cropH} px  (Position {cropX},{cropY} · Original {(int)_imgW}×{(int)_imgH})";
+        _statusText.Text = string.Format(Strings.T("crop.status_summary"),
+            cropW, cropH, cropX, cropY, (int)_imgW, (int)_imgH);
     }
 
     private void SaveCrop()
@@ -261,7 +262,7 @@ public sealed class CoverCropDialog : Window
         }
         catch (Exception ex)
         {
-            _statusText.Text = "Save-Fehler: " + ex.Message;
+            _statusText.Text = string.Format(Strings.T("crop.status_save_fail"), ex.Message);
         }
     }
 }

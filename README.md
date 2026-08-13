@@ -7,6 +7,13 @@
 mit direkter [f95zone.to](https://f95zone.to/)-Anbindung. Plugin für den
 [KroModIx](https://github.com/KroModIx/KroModIx).
 
+## Neu in v0.14.0
+- **DE+EN-Übersetzung** aller User-facing Strings (218 Keys) — Tab-Labels,
+  Buttons, Placeholders, Tooltips, Statusmeldungen, Notifications, Dialoge,
+  Detail-Sektionen (Archive-Browser, Save-Editor, Mods-Pipeline, Settings,
+  Cover-Crop, Translate-Setup, Rename-Config). Sprachwechsel im Host schaltet
+  nach Kachel-Reselect live um.
+
 ## Ziel
 
 Nicht Steam-Spiele mit `game/`-Marker-Ordner: Ren'Py-Adult-Visual-Novels

@@ -6,6 +6,7 @@ using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.Layout;
 using Avalonia.Media;
+using KroModIx.Plugin.RenPyAssist.Services;
 
 namespace KroModIx.Plugin.RenPyAssist.Views;
 
@@ -20,8 +21,10 @@ public sealed class TextInputDialog : Window
     private string? _result;
 
     public TextInputDialog(string title, string message, string initialValue = "",
-        string acceptLabel = "OK", string cancelLabel = "Abbrechen")
+        string? acceptLabel = null, string? cancelLabel = null)
     {
+        acceptLabel ??= Strings.T("btn.ok");
+        cancelLabel ??= Strings.T("btn.cancel");
         Title = title;
         Width = 480;
         SizeToContent = SizeToContent.Height;
@@ -98,7 +101,7 @@ public sealed class TextInputDialog : Window
     /// <summary>Öffnet den Dialog modal am MainWindow und liefert den Text
     /// zurück, oder null bei Abbruch (Escape/Cancel/leerer String).</summary>
     public static async Task<string?> PromptAsync(string title, string message,
-        string initialValue = "", string acceptLabel = "OK", string cancelLabel = "Abbrechen")
+        string initialValue = "", string? acceptLabel = null, string? cancelLabel = null)
     {
         var dialog = new TextInputDialog(title, message, initialValue, acceptLabel, cancelLabel);
         var owner = Application.Current?.ApplicationLifetime

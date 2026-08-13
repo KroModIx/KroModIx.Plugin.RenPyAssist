@@ -9,6 +9,7 @@ using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using KroModIx.Plugin.Contracts;
+using KroModIx.Plugin.RenPyAssist.Services;
 using KroModIx.Plugin.RenPyAssist.Services.Modding;
 
 namespace KroModIx.Plugin.RenPyAssist.Views;
@@ -28,7 +29,7 @@ public sealed partial class ModsViewModel : ObservableObject
 
     [ObservableProperty] private ModTypeOption? _selectedType;
     [ObservableProperty] private bool _isBusy;
-    [ObservableProperty] private string _statusText = "Wähle einen Mod-Typ und klick 'Bauen'.";
+    [ObservableProperty] private string _statusText = Strings.T("status.mods_default");
     [ObservableProperty] private int _progressCurrent;
     [ObservableProperty] private int _progressTotal;
     [ObservableProperty] private string _progressFile = "";
@@ -38,16 +39,14 @@ public sealed partial class ModsViewModel : ObservableObject
 
     public ObservableCollection<ModTypeOption> Types { get; } = new()
     {
-        new(ModTypeId.Walkthrough, "Walkthrough", "🚩",
-            "Zeigt in Choice-Menus die besten Optionen — Variablen-basiert per Regex-Analyse."),
-        new(ModTypeId.Cheat, "Cheat", "💰",
-            "F11-Overlay im Spiel: alle Store-Variablen live editieren (Geld, Beziehungswerte, Flags)."),
-        new(ModTypeId.Rename, "Rename", "✏",
-            "Character-Umbenennung mit Editor-Dialog (Alt→Neu). Wenn KI konfiguriert: " +
-            "Body-Texte werden konsistent umgeschrieben (Grammatik, Beziehungswörter)."),
-        new(ModTypeId.Translate, "Translate", "🌐",
-            "KI-Batch-Übersetzung aller Dialoge in eine Zielsprache. Braucht Host-KI " +
-            "(Ollama/Cloud). Ollama: ~5-10 s/Batch, Cloud: ~2-3 s/Batch. Bei 500 Says ≈ 1-3 min."),
+        new(ModTypeId.Walkthrough, Strings.T("mod.walkthrough.name"), "🚩",
+            Strings.T("mod.walkthrough.desc")),
+        new(ModTypeId.Cheat, Strings.T("mod.cheat.name"), "💰",
+            Strings.T("mod.cheat.desc")),
+        new(ModTypeId.Rename, Strings.T("mod.rename.name"), "✏",
+            Strings.T("mod.rename.desc")),
+        new(ModTypeId.Translate, Strings.T("mod.translate.name"), "🌐",
+            Strings.T("mod.translate.desc")),
     };
 
     public ModsViewModel(string containerPath, string? activeSubPath,
@@ -71,8 +70,8 @@ public sealed partial class ModsViewModel : ObservableObject
         var manifestPath = Path.Combine(GameDir, OneClickModBuilder.ManifestFileName);
         HasManifest = File.Exists(manifestPath);
         ManifestInfo = HasManifest
-            ? $"KrosteMod installiert (Manifest: {manifestPath})"
-            : "Kein KrosteMod aktiv.";
+            ? string.Format(Strings.T("status.krostemod_installed"), manifestPath)
+            : Strings.T("status.krostemod_none");
     }
 
     [RelayCommand]
@@ -81,25 +80,23 @@ public sealed partial class ModsViewModel : ObservableObject
         if (SelectedType is null) return;
         if (!Directory.Exists(GameDir))
         {
-            await _host.Dialogs.ShowMessageAsync("game/-Ordner nicht gefunden",
-                $"Erwartet: {GameDir}");
+            await _host.Dialogs.ShowMessageAsync(Strings.T("dialog.mods_game_dir_title"),
+                string.Format(Strings.T("dialog.mods_game_dir_msg"), GameDir));
             return;
         }
 
         // KI ist optional (Rename nutzt KI für Body-Rewrite falls verfügbar,
         // Walkthrough/Cheat kommen ohne KI aus).
 
-        var ok = await _host.Dialogs.ConfirmAsync($"{SelectedType.DisplayName}-Mod bauen?",
-            $"Der Mod wird für „{Path.GetFileName(_containerPath)}\" gebaut und in " +
-            $"„{GameDir}\" deployt. Alle originalen .rpyc werden als .krostemod-bak " +
-            $"gesichert. Deinstallation über „🗑 Deinstallieren\" — restauriert Originale.\n\n" +
-            $"Fortfahren?");
+        var ok = await _host.Dialogs.ConfirmAsync(
+            string.Format(Strings.T("dialog.build_confirm_title"), SelectedType.DisplayName),
+            string.Format(Strings.T("dialog.build_confirm_msg"), Path.GetFileName(_containerPath), GameDir));
         if (!ok) return;
 
         try
         {
             IsBusy = true;
-            StatusText = $"Baue {SelectedType.DisplayName} …";
+            StatusText = string.Format(Strings.T("status.building"), SelectedType.DisplayName);
             ProgressCurrent = 0; ProgressTotal = 0; ProgressFile = "";
 
             var progress = new Progress<OneClickProgress>(p => Dispatcher.UIThread.Post(() =>
@@ -115,16 +112,16 @@ public sealed partial class ModsViewModel : ObservableObject
                 renameConfigProvider: AskRenameConfig,
                 translationConfigProvider: AskTranslationConfig));
 
-            StatusText = $"✔ Mod deployed: {result.DeployedFileCount} Datei(en) in {GameDir}";
+            StatusText = string.Format(Strings.T("status.mod_deployed"), result.DeployedFileCount, GameDir);
             _host.Notifications.Notify(
-                $"{SelectedType.DisplayName} für {Path.GetFileName(_containerPath)} installiert " +
-                $"({result.DeployedFileCount} Datei(en))",
+                string.Format(Strings.T("notify.mod_installed"),
+                    SelectedType.DisplayName, Path.GetFileName(_containerPath), result.DeployedFileCount),
                 NotificationLevel.Success);
             RefreshManifestInfo();
         }
         catch (Exception ex)
         {
-            StatusText = "Fehler: " + ex.Message;
+            StatusText = string.Format(Strings.T("status.error_prefix"), ex.Message);
             _host.Logger.Warn(ex, "Mod-Build fehlgeschlagen");
         }
         finally { IsBusy = false; }
@@ -169,7 +166,7 @@ public sealed partial class ModsViewModel : ObservableObject
         {
             Dispatcher.UIThread.Post(() =>
             {
-                StatusText = $"🌐 KI-Übersetzung ({targetLang.ToNativeName()}) läuft …";
+                StatusText = string.Format(Strings.T("translate.status"), targetLang.ToNativeName());
                 ProgressCurrent = 0;
                 ProgressTotal = uniqueTexts.Count;
             });
@@ -179,7 +176,7 @@ public sealed partial class ModsViewModel : ObservableObject
             {
                 ProgressCurrent = p.Done;
                 ProgressTotal = p.Total;
-                ProgressFile = $"KI-Übersetzung {p.CurrentLanguage.ToNativeName()}";
+                ProgressFile = string.Format(Strings.T("translate.progress_label"), p.CurrentLanguage.ToNativeName());
             }));
             var translated = translator.TranslateAsync(uniqueTexts, targetLang,
                 sourceLanguage: TargetLanguage.English,
@@ -198,7 +195,7 @@ public sealed partial class ModsViewModel : ObservableObject
         {
             _host.Logger.Warn(ex, "KI-Batch-Übersetzung fehlgeschlagen");
             Dispatcher.UIThread.Post(() =>
-                StatusText = "KI-Übersetzung fehlgeschlagen: " + ex.Message);
+                StatusText = string.Format(Strings.T("translate.fail"), ex.Message));
             return null;
         }
     }
@@ -219,35 +216,37 @@ public sealed partial class ModsViewModel : ObservableObject
     {
         if (!Directory.Exists(GameDir))
         {
-            StatusText = $"game/-Ordner nicht gefunden: {GameDir}";
+            StatusText = string.Format(Strings.T("status.game_dir_missing"), GameDir);
             return;
         }
         try
         {
             IsBusy = true;
-            StatusText = "Suche .rpyc-Dateien …";
+            StatusText = Strings.T("status.searching_rpyc");
             ProgressCurrent = 0; ProgressTotal = 0; ProgressFile = "";
             var progress = new Progress<(int done, int total, string current)>(p =>
                 Dispatcher.UIThread.Post(() =>
                 {
                     ProgressCurrent = p.done; ProgressTotal = p.total;
                     ProgressFile = Path.GetFileName(p.current);
-                    StatusText = $"Dekompiliere {p.done}/{p.total} …";
+                    StatusText = string.Format(Strings.T("status.decompile_progress"), p.done, p.total);
                 }));
             var result = await Task.Run(() =>
                 _rpycBatch.DecompileDirectory(GameDir, progress, skipUpToDate: true));
             StatusText = result.Failed == 0
-                ? $"✔ {result.Succeeded} dekompiliert, {result.Skipped} übersprungen (bereits aktuell)."
-                : $"⚠ {result.Succeeded} OK, {result.Failed} Fehler, {result.Skipped} übersprungen — Log prüfen.";
+                ? string.Format(Strings.T("status.decompile_ok"), result.Succeeded, result.Skipped)
+                : string.Format(Strings.T("status.decompile_partial"), result.Succeeded, result.Failed, result.Skipped);
             _host.Notifications.Notify(
-                $"Decompile: {result.Succeeded}/{result.Total} .rpyc → .rpy",
+                string.Format(Strings.T("notify.decompile_summary"), result.Succeeded, result.Total),
                 result.Failed == 0 ? NotificationLevel.Success : NotificationLevel.Warning);
         }
         catch (Exception ex)
         {
             _host.Logger.Warn(ex, "RenPy-Decompile fehlgeschlagen: {Dir}", GameDir);
-            StatusText = "Fehler: " + ex.Message;
-            _host.Notifications.Notify("Decompile-Fehler: " + ex.Message, NotificationLevel.Error);
+            StatusText = string.Format(Strings.T("status.error_prefix"), ex.Message);
+            _host.Notifications.Notify(
+                string.Format(Strings.T("notify.decompile_error"), ex.Message),
+                NotificationLevel.Error);
         }
         finally { IsBusy = false; }
     }
@@ -257,25 +256,25 @@ public sealed partial class ModsViewModel : ObservableObject
     {
         if (!HasManifest)
         {
-            StatusText = "Kein KrosteMod installiert — nichts zu deinstallieren.";
+            StatusText = Strings.T("status.no_krostemod");
             return;
         }
-        var ok = await _host.Dialogs.ConfirmAsync("KrosteMod deinstallieren?",
-            $"Alle modifizierten .rpy werden gelöscht, .rpyc-Backups (.krostemod-bak) werden " +
-            $"restauriert.\n\nFortfahren?");
+        var ok = await _host.Dialogs.ConfirmAsync(Strings.T("dialog.krostemod_uninstall_title"),
+            Strings.T("dialog.krostemod_uninstall_msg"));
         if (!ok) return;
         try
         {
             IsBusy = true;
-            StatusText = "Deinstalliere …";
+            StatusText = Strings.T("status.uninstalling");
             var result = await Task.Run(() => _builder.Uninstall(GameDir));
-            StatusText = $"✔ {result.RemovedFiles} Datei(en) entfernt, {result.RestoredBackups} Backup(s) restauriert.";
-            _host.Notifications.Notify("KrosteMod deinstalliert", NotificationLevel.Success);
+            StatusText = string.Format(Strings.T("status.uninstall_ok"),
+                result.RemovedFiles, result.RestoredBackups);
+            _host.Notifications.Notify(Strings.T("notify.krostemod_uninstalled"), NotificationLevel.Success);
             RefreshManifestInfo();
         }
         catch (Exception ex)
         {
-            StatusText = "Fehler: " + ex.Message;
+            StatusText = string.Format(Strings.T("status.error_prefix"), ex.Message);
         }
         finally { IsBusy = false; }
     }

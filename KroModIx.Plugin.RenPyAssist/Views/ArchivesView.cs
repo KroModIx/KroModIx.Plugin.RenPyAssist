@@ -6,6 +6,7 @@ using Avalonia.Data.Converters;
 using Avalonia.Layout;
 using Avalonia.Markup.Xaml.MarkupExtensions;
 using Avalonia.Media;
+using KroModIx.Plugin.RenPyAssist.Services;
 
 namespace KroModIx.Plugin.RenPyAssist.Views;
 
@@ -20,14 +21,14 @@ public sealed class ArchivesView : UserControl
     public ArchivesView()
     {
         // --- Toolbar oben (Archiv-Aktionen, kein Preview-Playback mehr) ---
-        var scanBtn = new Button { Content = "🔄  Neu scannen" };
+        var scanBtn = new Button { Content = Strings.T("btn.rescan") };
         scanBtn.Bind(Button.CommandProperty, new Binding(nameof(ArchivesViewModel.ScanCommand)));
 
-        var extractBtn = new Button { Content = "⬇  Datei entpacken" };
+        var extractBtn = new Button { Content = Strings.T("btn.extract_selected") };
         extractBtn.Classes.Add("accent");
         extractBtn.Bind(Button.CommandProperty, new Binding(nameof(ArchivesViewModel.ExtractSelectedCommand)));
 
-        var extractAllBtn = new Button { Content = "⬇⬇  Alles entpacken" };
+        var extractAllBtn = new Button { Content = Strings.T("btn.extract_all") };
         extractAllBtn.Bind(Button.CommandProperty, new Binding(nameof(ArchivesViewModel.ExtractAllCommand)));
 
         var toolbar = new StackPanel
@@ -136,9 +137,9 @@ public sealed class ArchivesView : UserControl
 
         // --- Bottom: Play-Button-Panel (nur bei IsMedia sichtbar) ---
         // "▶ Inline abspielen" — sichtbar wenn CanInlinePlay && !IsPlayingInline
-        var inlinePlayBtn = new Button { Content = "▶  Inline abspielen" };
+        var inlinePlayBtn = new Button { Content = Strings.T("btn.play_inline") };
         inlinePlayBtn.Bind(Button.CommandProperty, new Binding(nameof(ArchivesViewModel.ToggleInlinePlaybackCommand)));
-        ToolTip.SetTip(inlinePlayBtn, "MJPEG-Frame-Stream via ffmpeg (kein Audio, 12 fps)");
+        ToolTip.SetTip(inlinePlayBtn, Strings.T("tooltip.inline_play"));
         // Sichtbar wenn Video + ffmpeg da UND grade nicht abspielend — sonst
         // zeigen wir den Pause-Btn als Geschwister. RenPack-Muster: separate
         // Buttons statt Toggle-Text, sauber-exklusiv per MultiBinding.
@@ -154,16 +155,16 @@ public sealed class ArchivesView : UserControl
         inlinePlayBtn.Bind(Button.IsVisibleProperty, playVisibility);
 
         // "⏸ Pause" — sichtbar wenn IsPlayingInline
-        var pauseBtn = new Button { Content = "⏸  Pause" };
+        var pauseBtn = new Button { Content = Strings.T("btn.pause") };
         pauseBtn.Bind(Button.CommandProperty, new Binding(nameof(ArchivesViewModel.ToggleInlinePlaybackCommand)));
         pauseBtn.Bind(Button.IsVisibleProperty, new Binding(nameof(ArchivesViewModel.IsPlayingInline)));
-        ToolTip.SetTip(pauseBtn, "Inline-Wiedergabe stoppen");
+        ToolTip.SetTip(pauseBtn, Strings.T("tooltip.inline_stop"));
 
         // "⤴ Extern öffnen" (accent, immer wenn IsMedia)
-        var externBtn = new Button { Content = "⤴  Extern öffnen" };
+        var externBtn = new Button { Content = Strings.T("btn.open_external") };
         externBtn.Classes.Add("accent");
         externBtn.Bind(Button.CommandProperty, new Binding(nameof(ArchivesViewModel.OpenExternalCommand)));
-        ToolTip.SetTip(externBtn, "Im System-Default-Player öffnen (VLC/mpv/…)");
+        ToolTip.SetTip(externBtn, Strings.T("tooltip.open_external"));
 
         var buttonPanel = new StackPanel
         {
@@ -237,11 +238,7 @@ public sealed class ArchivesView : UserControl
         // ffmpeg fehlt → Install-Hinweis (nur bei Video)
         var ffmpegHint = new TextBlock
         {
-            Text = "ffmpeg fehlt — für Inline-Playback bitte installieren:\n" +
-                   "Fedora/Bazzite: sudo dnf install ffmpeg-free\n" +
-                   "Debian/Ubuntu: sudo apt install ffmpeg\n" +
-                   "Windows: winget install ffmpeg\n\n" +
-                   "Der externe Player funktioniert trotzdem.",
+            Text = Strings.T("hint.ffmpeg_missing"),
             TextWrapping = TextWrapping.Wrap,
             HorizontalAlignment = HorizontalAlignment.Center,
             VerticalAlignment = VerticalAlignment.Center,

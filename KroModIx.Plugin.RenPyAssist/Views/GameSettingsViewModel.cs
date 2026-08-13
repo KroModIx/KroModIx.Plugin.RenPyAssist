@@ -47,9 +47,10 @@ public sealed partial class GameSettingsViewModel : ObservableObject
     [ObservableProperty] private bool _isLoggingIn;
 
     public string DisplayName => _game.DisplayName;
-    public string ContainerPathText => $"Container: {_game.ContainerPath}";
+    public string ContainerPathText => string.Format(Strings.T("status.container_prefix"), _game.ContainerPath);
     public string LastCheckedText => _game.LastCheckedUtc is null
-        ? "" : $"zuletzt geprüft: {_game.LastCheckedUtc.Value.ToLocalTime():yyyy-MM-dd HH:mm}";
+        ? "" : string.Format(Strings.T("status.last_checked_prefix"),
+            _game.LastCheckedUtc.Value.ToLocalTime().ToString("yyyy-MM-dd HH:mm"));
 
     public GameSettingsViewModel(RenPyGame game, GamesRegistry registry,
         RenPySettingsService settings, F95zoneClient f95, F95zoneSessionStore sessionStore,
@@ -87,8 +88,9 @@ public sealed partial class GameSettingsViewModel : ObservableObject
     private void UpdateLoginStatus()
     {
         LoginStatus = _f95.IsAuthenticated
-            ? $"✔ Eingeloggt als {(F95Username.Length > 0 ? F95Username : "(unbekannt)")}"
-            : "✘ Nicht eingeloggt";
+            ? string.Format(Strings.T("status.login_logged_in_as"),
+                F95Username.Length > 0 ? F95Username : Strings.T("status.login_logged_in_unknown"))
+            : Strings.T("status.login_not_logged_in");
     }
 
     // ---- Spiel-spezifische Actions ----
@@ -101,8 +103,8 @@ public sealed partial class GameSettingsViewModel : ObservableObject
         {
             if (!string.IsNullOrEmpty(_game.ThreadUrl))
             {
-                var ok = await _host.Dialogs.ConfirmAsync("Verknüpfung entfernen",
-                    $"Thread-URL für „{_game.DisplayName}\" entfernen?");
+                var ok = await _host.Dialogs.ConfirmAsync(Strings.T("dialog.remove_link_title"),
+                    string.Format(Strings.T("dialog.remove_link_msg"), _game.DisplayName));
                 if (!ok) return;
                 _game.ThreadUrl = null;
                 _game.LastRemoteVersion = null;
@@ -110,21 +112,23 @@ public sealed partial class GameSettingsViewModel : ObservableObject
                 _game.Genres.Clear();
                 _game.DescriptionTranslations.Clear();
                 _registry.Update(_game);
-                GameStatus = "Verknüpfung entfernt.";
+                GameStatus = Strings.T("status.link_removed");
             }
             return;
         }
         if (!url.StartsWith("http://", StringComparison.OrdinalIgnoreCase)
             && !url.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
         {
-            await _host.Dialogs.ShowMessageAsync("URL ungültig",
-                "Bitte eine vollständige http(s)://-URL eintragen.");
+            await _host.Dialogs.ShowMessageAsync(Strings.T("dialog.invalid_url_title"),
+                Strings.T("dialog.invalid_url_msg"));
             return;
         }
         _game.ThreadUrl = url;
         _registry.Update(_game);
-        GameStatus = "Thread gespeichert — prüfe jetzt …";
-        _host.Notifications.Notify($"Thread verknüpft: {_game.DisplayName}", NotificationLevel.Success);
+        GameStatus = Strings.T("status.thread_saved");
+        _host.Notifications.Notify(
+            string.Format(Strings.T("notify.thread_linked"), _game.DisplayName),
+            NotificationLevel.Success);
         await CheckNowAsync();
     }
 
@@ -133,17 +137,17 @@ public sealed partial class GameSettingsViewModel : ObservableObject
     {
         if (string.IsNullOrEmpty(_game.ThreadUrl))
         {
-            GameStatus = "Kein Thread-URL — nichts zu prüfen.";
+            GameStatus = Strings.T("status.no_thread_check");
             return;
         }
         try
         {
             IsBusy = true;
-            GameStatus = "Prüfe Thread …";
+            GameStatus = Strings.T("status.checking_thread");
             await _worker.CheckNowAsync();
-            GameStatus = "Check fertig.";
+            GameStatus = Strings.T("status.check_done");
         }
-        catch (Exception ex) { GameStatus = "Check-Fehler: " + ex.Message; }
+        catch (Exception ex) { GameStatus = string.Format(Strings.T("status.check_error"), ex.Message); }
         finally { IsBusy = false; }
     }
 
@@ -151,25 +155,23 @@ public sealed partial class GameSettingsViewModel : ObservableObject
     private async Task InstallUpdateAsync()
     {
         var zip = await _host.Dialogs.PickFileAsync(
-            $"Update-ZIP für „{_game.DisplayName}\"",
-            ("Ren'Py-ZIPs", new[] { "*.zip" }));
+            string.Format(Strings.T("dialog.pick_update_zip"), _game.DisplayName),
+            (Strings.T("dialog.zip_filter"), new[] { "*.zip" }));
         if (zip is null) return;
-        var ok = await _host.Dialogs.ConfirmAsync("Update installieren",
-            $"ZIP wird in „{_game.ContainerPath}\" entpackt. Save-Games werden aus dem alten " +
-            $"Sub-Ordner in den neuen kopiert. Der alte Sub-Ordner wird anschließend " +
-            $"gelöscht. Die ZIP-Datei wird in „archive/\" archiviert.\n\nFortfahren?");
+        var ok = await _host.Dialogs.ConfirmAsync(Strings.T("dialog.install_update_title"),
+            string.Format(Strings.T("dialog.install_update_msg"), _game.ContainerPath));
         if (!ok) return;
         try
         {
             IsBusy = true;
-            GameStatus = "Entpacke …";
+            GameStatus = Strings.T("status.unpacking");
             var result = await _installer.InstallAsync(_game, zip);
             if (result.Success)
             {
                 _host.Notifications.Notify(
-                    $"Update installiert: {_game.DisplayName} → {result.NewSubPath}",
+                    string.Format(Strings.T("notify.update_installed"), _game.DisplayName, result.NewSubPath),
                     NotificationLevel.Success);
-                GameStatus = "Update fertig.";
+                GameStatus = Strings.T("status.update_done");
                 RefreshFromRegistry();
                 // Sidebar-Kachel-Badge muss sofort verschwinden — ohne
                 // Trigger würde die 60s-Periodik greifen.
@@ -178,9 +180,9 @@ public sealed partial class GameSettingsViewModel : ObservableObject
             }
             else
             {
-                await _host.Dialogs.ShowMessageAsync("Install fehlgeschlagen",
-                    result.Error ?? "Unbekannter Fehler.");
-                GameStatus = "Fehler: " + result.Error;
+                await _host.Dialogs.ShowMessageAsync(Strings.T("dialog.install_fail_title"),
+                    result.Error ?? Strings.T("dialog.install_fail_unknown"));
+                GameStatus = string.Format(Strings.T("status.status_error_prefix"), result.Error);
             }
         }
         finally { IsBusy = false; }
@@ -205,9 +207,8 @@ public sealed partial class GameSettingsViewModel : ObservableObject
             if (!string.IsNullOrEmpty(c) && File.Exists(c)) { src = c; break; }
         if (src is null)
         {
-            await _host.Dialogs.ShowMessageAsync("Kein Cover",
-                "Es gibt noch kein Cover-Bild zum Zuschneiden. Erst einen f95zone-" +
-                "Thread eintragen und 🔄 Prüfen klicken.");
+            await _host.Dialogs.ShowMessageAsync(Strings.T("dialog.no_cover_title"),
+                Strings.T("dialog.no_cover_msg"));
             return;
         }
         var outputPath = GameLocalStore.SidebarCoverPath(_containerPath);
@@ -219,7 +220,7 @@ public sealed partial class GameSettingsViewModel : ObservableObject
                 {
                     _host.TrySetManualGameCover(_containerPath, path);
                     _host.Notifications.Notify(
-                        "Sidebar-Ausschnitt gespeichert und gesetzt.",
+                        Strings.T("notify.sidebar_crop_saved"),
                         NotificationLevel.Success);
                 }
                 catch (Exception ex) { _host.Logger.Warn(ex, "TrySetManualGameCover nach Crop fehlgeschlagen"); }
@@ -258,22 +259,22 @@ public sealed partial class GameSettingsViewModel : ObservableObject
         var parent = Path.GetDirectoryName(oldPath);
         if (string.IsNullOrEmpty(parent) || !Directory.Exists(oldPath))
         {
-            await _host.Dialogs.ShowMessageAsync("Ordner umbenennen",
-                $"Container-Ordner existiert nicht:\n{oldPath}");
+            await _host.Dialogs.ShowMessageAsync(Strings.T("dialog.rename_title"),
+                string.Format(Strings.T("dialog.rename_missing_msg"), oldPath));
             return;
         }
 
         var newName = await TextInputDialog.PromptAsync(
-            title: "Ordner umbenennen",
-            message: $"Neuer Ordnername für „{oldName}\":\n(Der Container-Ordner auf der Platte wird umbenannt. Container-lokale Metadaten in .renpyassist/ wandern mit.)",
+            title: Strings.T("dialog.rename_title"),
+            message: string.Format(Strings.T("dialog.rename_prompt"), oldName),
             initialValue: oldName,
-            acceptLabel: "Umbenennen");
+            acceptLabel: Strings.T("btn.rename"));
         if (string.IsNullOrWhiteSpace(newName)) return;
         // Basename-Validierung: keine Path-Separatoren, keine reservierten Zeichen.
         if (newName.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0)
         {
-            await _host.Dialogs.ShowMessageAsync("Ordner umbenennen",
-                "Der Name enthält ungültige Zeichen (/, \\, :, *, ?, \", <, >, |).");
+            await _host.Dialogs.ShowMessageAsync(Strings.T("dialog.rename_title"),
+                Strings.T("dialog.rename_invalid_chars"));
             return;
         }
         if (string.Equals(newName, oldName, StringComparison.Ordinal)) return;
@@ -281,15 +282,15 @@ public sealed partial class GameSettingsViewModel : ObservableObject
         var newPath = Path.Combine(parent, newName);
         if (Directory.Exists(newPath) || File.Exists(newPath))
         {
-            await _host.Dialogs.ShowMessageAsync("Ordner umbenennen",
-                $"Zielpfad existiert bereits:\n{newPath}");
+            await _host.Dialogs.ShowMessageAsync(Strings.T("dialog.rename_title"),
+                string.Format(Strings.T("dialog.rename_target_exists"), newPath));
             return;
         }
 
         try
         {
             IsBusy = true;
-            GameStatus = "Benenne Ordner um …";
+            GameStatus = Strings.T("status.renaming");
             // Directory.Move ist auf demselben Filesystem atomar (rename(2)),
             // über FS-Grenzen ein Copy+Delete — dann längere Laufzeit, aber
             // wir tolerieren das.
@@ -306,19 +307,19 @@ public sealed partial class GameSettingsViewModel : ObservableObject
 
             _host.Notifications.Notify(
                 hostAccepted
-                    ? $"Ordner umbenannt: „{oldName}\" → „{newName}\""
-                    : $"Ordner umbenannt (Host-Kachel wird beim Neustart nachgezogen)",
+                    ? string.Format(Strings.T("notify.folder_renamed"), oldName, newName)
+                    : Strings.T("notify.folder_renamed_pending"),
                 NotificationLevel.Success);
-            GameStatus = "Ordner umbenannt.";
+            GameStatus = Strings.T("status.renamed");
             OnPropertyChanged(nameof(ContainerPathText));
             OnPropertyChanged(nameof(DisplayName));
         }
         catch (Exception ex)
         {
             _host.Logger.Warn(ex, "Rename fehlgeschlagen: {Old} → {New}", oldPath, newPath);
-            await _host.Dialogs.ShowMessageAsync("Ordner umbenennen",
-                $"Umbenennen fehlgeschlagen:\n{ex.Message}");
-            GameStatus = "Rename fehlgeschlagen.";
+            await _host.Dialogs.ShowMessageAsync(Strings.T("dialog.rename_title"),
+                string.Format(Strings.T("dialog.rename_fail_msg"), ex.Message));
+            GameStatus = Strings.T("status.rename_fail");
         }
         finally { IsBusy = false; }
     }
@@ -332,8 +333,8 @@ public sealed partial class GameSettingsViewModel : ObservableObject
         var launcher = FindLauncher(dir);
         if (launcher is null)
         {
-            _ = _host.Dialogs.ShowMessageAsync("Kein Launcher",
-                $"Kein .sh/.exe im aktiven Sub-Ordner gefunden:\n{dir}");
+            _ = _host.Dialogs.ShowMessageAsync(Strings.T("dialog.no_launcher_title"),
+                string.Format(Strings.T("dialog.no_launcher_msg"), dir));
             return;
         }
         try
@@ -361,7 +362,7 @@ public sealed partial class GameSettingsViewModel : ObservableObject
     [RelayCommand]
     private async Task PickDownloadsAsync()
     {
-        var picked = await _host.Dialogs.PickFolderAsync("Downloads-Ordner wählen");
+        var picked = await _host.Dialogs.PickFolderAsync(Strings.T("dialog.pick_downloads"));
         if (!string.IsNullOrEmpty(picked)) DownloadsDir = picked;
     }
 
@@ -375,8 +376,8 @@ public sealed partial class GameSettingsViewModel : ObservableObject
             CheckIntervalMinutes = Math.Max(15, IntervalMinutes),
             F95Username = F95Username ?? "",
         });
-        GlobalStatus = $"Gespeichert um {DateTime.Now:HH:mm:ss}.";
-        _host.Notifications.Notify("Einstellungen gespeichert", NotificationLevel.Success);
+        GlobalStatus = string.Format(Strings.T("status.global_saved"), DateTime.Now.ToString("HH:mm:ss"));
+        _host.Notifications.Notify(Strings.T("notify.settings_saved"), NotificationLevel.Success);
     }
 
     [RelayCommand]
@@ -384,13 +385,13 @@ public sealed partial class GameSettingsViewModel : ObservableObject
     {
         if (string.IsNullOrWhiteSpace(F95Username) || string.IsNullOrWhiteSpace(F95Password))
         {
-            LoginStatus = "⚠ Bitte Username + Passwort eintragen.";
+            LoginStatus = Strings.T("status.login_missing_creds");
             return;
         }
         try
         {
             IsLoggingIn = true;
-            LoginStatus = "Logging in …";
+            LoginStatus = Strings.T("status.login_logging_in");
             var ok = await _f95.LoginAsync(F95Username, F95Password);
             if (ok)
             {
@@ -403,15 +404,15 @@ public sealed partial class GameSettingsViewModel : ObservableObject
                     F95Username = F95Username,
                 });
                 F95Password = "";
-                LoginStatus = $"✔ Eingeloggt als {F95Username}";
-                _host.Notifications.Notify("f95zone-Login erfolgreich", NotificationLevel.Success);
+                LoginStatus = string.Format(Strings.T("status.login_ok"), F95Username);
+                _host.Notifications.Notify(Strings.T("notify.f95_login_ok"), NotificationLevel.Success);
             }
-            else { LoginStatus = "✘ Login fehlgeschlagen (falsche Credentials?)"; }
+            else { LoginStatus = Strings.T("status.login_fail"); }
         }
-        catch (F95zoneAuthException ex) { LoginStatus = "✘ " + ex.Message; }
+        catch (F95zoneAuthException ex) { LoginStatus = string.Format(Strings.T("status.login_prefix_fail"), ex.Message); }
         catch (Exception ex)
         {
-            LoginStatus = "✘ Fehler: " + ex.Message;
+            LoginStatus = string.Format(Strings.T("status.login_error"), ex.Message);
             _host.Logger.Warn(ex, "f95zone-Login-Ausnahme");
         }
         finally { IsLoggingIn = false; }
@@ -421,8 +422,8 @@ public sealed partial class GameSettingsViewModel : ObservableObject
     private void Logout()
     {
         _sessionStore.Save("");
-        LoginStatus = "✘ Nicht eingeloggt (Cookies gelöscht — Plugin-Restart nötig)";
-        _host.Notifications.Notify("f95zone-Cookies gelöscht", NotificationLevel.Info);
+        LoginStatus = Strings.T("status.logout_done");
+        _host.Notifications.Notify(Strings.T("notify.f95_cookies_cleared"), NotificationLevel.Info);
     }
 
     [RelayCommand]

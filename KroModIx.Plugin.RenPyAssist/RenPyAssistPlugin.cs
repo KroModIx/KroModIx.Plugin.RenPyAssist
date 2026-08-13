@@ -25,10 +25,11 @@ public sealed class RenPyAssistPlugin : IGameModPlugin, IUpdateNotifier, IGameLa
     public PluginMetadata Metadata { get; } = new(
         Id: "kroste.renpyassist",
         DisplayName: "Ren'Py Assist",
-        Version: "0.13.0",
+        Version: "0.14.0",
         Author: "Kroste",
         Description: "Verwaltet Ren'Py-Spiele als eigenständige Sidebar-Kacheln " +
-            "(Multi-Tile). Setup via Host-Wizard '🎮 Ordner mit Spielen scannen' " +
+            "(Multi-Tile). v0.14.0: DE+EN-Uebersetzung aller User-facing Strings. " +
+            "Setup via Host-Wizard '🎮 Ordner mit Spielen scannen' " +
             "→ Host legt pro Ren'Py-Container eine Kachel mit engine=renpy an, " +
             "Plugin übernimmt. Sub-Path-Rotation für Updates, game/saves/ bleibt " +
             "erhalten. F95zone-Thread-Watch mit CSRF-Login und verschlüsselten " +
@@ -69,6 +70,7 @@ public sealed class RenPyAssistPlugin : IGameModPlugin, IUpdateNotifier, IGameLa
 
     public Task InitializeAsync(IHostServices host, IReadOnlyList<DetectedGame> activatedGames, CancellationToken ct)
     {
+        Strings.Init(host.Localization);
         _host = host;
         _paths = new RenPyPaths(host);
         _settings = new RenPySettingsService(_paths);
@@ -181,7 +183,7 @@ public sealed class RenPyAssistPlugin : IGameModPlugin, IUpdateNotifier, IGameLa
             _downloadWatcher.StableZipDetected += path =>
             {
                 host.Notifications.Notify(
-                    $"Neue Ren'Py-ZIP: {Path.GetFileName(path)}",
+                    string.Format(Strings.T("notify.new_zip"), Path.GetFileName(path)),
                     NotificationLevel.Info);
             };
             _downloadWatcher.Start(dlDir);
@@ -238,7 +240,7 @@ public sealed class RenPyAssistPlugin : IGameModPlugin, IUpdateNotifier, IGameLa
             infos.Add(new GameUpdateInfo(
                 SteamAppId: game.Target.SteamAppId ?? 0,
                 PendingCount: 1,
-                Summary: $"Ren'Py-Update verfügbar: {entry.LastRemoteVersion}")
+                Summary: string.Format(Strings.T("notify.update_available_summary"), entry.LastRemoteVersion))
             {
                 InstallDir = game.InstallDir,
             });
@@ -266,7 +268,8 @@ public sealed class RenPyAssistPlugin : IGameModPlugin, IUpdateNotifier, IGameLa
         {
             _host.Shell.OpenExternalUrl(entry.ThreadUrl!);
             _host.Notifications.Notify(
-                $"Update {entry.LastRemoteVersion} für „{entry.DisplayName}\" — Thread im Browser geöffnet.",
+                string.Format(Strings.T("notify.update_thread_opened"),
+                    entry.LastRemoteVersion, entry.DisplayName),
                 NotificationLevel.Info);
             return Task.FromResult(true);
         }
@@ -279,7 +282,7 @@ public sealed class RenPyAssistPlugin : IGameModPlugin, IUpdateNotifier, IGameLa
         if (launcher is null)
         {
             _host.Notifications.Notify(
-                $"Kein Ren'Py-Launcher in „{dir}\" gefunden.",
+                string.Format(Strings.T("notify.no_launcher"), dir),
                 NotificationLevel.Warning);
             return Task.FromResult(true); // wir sind zuständig, keine Host-Fallback-Chance
         }
@@ -292,13 +295,15 @@ public sealed class RenPyAssistPlugin : IGameModPlugin, IUpdateNotifier, IGameLa
                 UseShellExecute = true,
             });
             _host.Notifications.Notify(
-                $"Ren'Py-Spiel gestartet: {entry.DisplayName}", NotificationLevel.Success);
+                string.Format(Strings.T("notify.game_started"), entry.DisplayName),
+                NotificationLevel.Success);
         }
         catch (Exception ex)
         {
             _host.Logger.Warn(ex, "Ren'Py-Launcher-Start fehlgeschlagen: {L}", launcher);
             _host.Notifications.Notify(
-                $"Start fehlgeschlagen: {ex.Message}", NotificationLevel.Error);
+                string.Format(Strings.T("notify.game_start_fail"), ex.Message),
+                NotificationLevel.Error);
         }
         return Task.FromResult(true);
     }
@@ -329,7 +334,7 @@ public sealed class RenPyAssistPlugin : IGameModPlugin, IUpdateNotifier, IGameLa
         }
 
         public string Id => "game";
-        public string Label => "Übersicht";
+        public string Label => Strings.T("tab.overview");
         public string Icon => "\U0001F3AE"; // 🎮
         public int Order => 0;
         public bool IsVisible(DetectedGame game) => true;
@@ -358,7 +363,7 @@ public sealed class RenPyAssistPlugin : IGameModPlugin, IUpdateNotifier, IGameLa
         }
 
         public string Id => "archives";
-        public string Label => "Archive";
+        public string Label => Strings.T("tab.archives");
         public string Icon => "\U0001F4E6"; // 📦
         public int Order => 10;
         public bool IsVisible(DetectedGame game) => true;
@@ -384,7 +389,7 @@ public sealed class RenPyAssistPlugin : IGameModPlugin, IUpdateNotifier, IGameLa
         { _saves = saves; _registry = registry; _host = host; }
 
         public string Id => "saves";
-        public string Label => "Saves";
+        public string Label => Strings.T("tab.saves");
         public string Icon => "\U0001F4BE"; // 💾
         public int Order => 20;
         public bool IsVisible(DetectedGame game) => true;
@@ -412,7 +417,7 @@ public sealed class RenPyAssistPlugin : IGameModPlugin, IUpdateNotifier, IGameLa
         { _builder = builder; _rpycBatch = rpycBatch; _registry = registry; _host = host; }
 
         public string Id => "mods";
-        public string Label => "Mods";
+        public string Label => Strings.T("tab.mods");
         public string Icon => "\U0001F6E0"; // 🛠
         public int Order => 25;
         public bool IsVisible(DetectedGame game) => true;
@@ -448,7 +453,7 @@ public sealed class RenPyAssistPlugin : IGameModPlugin, IUpdateNotifier, IGameLa
         }
 
         public string Id => "settings";
-        public string Label => "Einstellungen";
+        public string Label => Strings.T("tab.settings");
         public string Icon => "⚙";
         public int Order => 30;
         public bool IsVisible(DetectedGame game) => true;
