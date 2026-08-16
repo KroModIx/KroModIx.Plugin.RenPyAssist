@@ -2,12 +2,12 @@
   "schema": 1,
   "id": "kroste.renpyassist",
   "displayName": "Ren'Py Assist",
-  "version": "0.14.1",
+  "version": "0.15.0",
   "author": "Kroste",
-  "description": "Verwaltet Ren'Py-Spiele als eigenständige Sidebar-Kacheln. v0.14.1: GIF-Cover-Guard im CoverCache — Magic-Bytes-Check auf .orig-Files vor GifStreamSource-Handoff (verhindert InvalidGifStreamException im Compositor). v0.14.0: DE+EN-Uebersetzung aller User-facing Strings (Tabs, Buttons, Dialoge, Notifications). v0.13: Standalone-Decompiler-Button im Mods-Tab (🔓 .rpyc dekompilieren, portiert aus RenPack — funktioniert ohne KrosteMod-Build). Ab v0.6: KrosteMod-Pipeline (Walkthrough/Cheat/Rename/Translate) — Plugin dekompiliert alle .rpyc, analysiert die .rpy und deployt einen fertigen Mod ins game/-Verzeichnis mit Uninstall-Manifest. Übersichts-View v0.5+ (Titel/Cover/Beschreibung KI-übersetzt/Genre), RPA-Archive-Browser + Save-Editor (v0.4). Setup via Host-Wizard '🎮 Ordner mit Spielen scannen'. Sub-Path-Rotation für Updates, F95zone-Login mit verschlüsselten Session-Cookies.",
+  "description": "Verwaltet Ren'Py-Spiele als eigenständige Sidebar-Kacheln. v0.15.0: Bitmap-Decode via zentralem Host-Baukasten IHostServices.Images (Contracts v1.18) — RPA-Archive-Preview, Save-Screenshot-Thumbnails, Cover-Crop-Dialog und Detail-View-Cover teilen sich die Format-Chain des Hosts (PNG/JPEG/BMP/GIF/WebP/AVIF/DDS). GIF-Cover-Sonderfall (IGifSource) bleibt unberuehrt. v0.14.1: GIF-Cover-Guard im CoverCache — Magic-Bytes-Check auf .orig-Files vor GifStreamSource-Handoff. v0.14.0: DE+EN-Uebersetzung aller User-facing Strings. v0.13: Standalone-Decompiler-Button im Mods-Tab. Ab v0.6: KrosteMod-Pipeline (Walkthrough/Cheat/Rename/Translate). Übersichts-View v0.5+ (Titel/Cover/Beschreibung KI-übersetzt/Genre), RPA-Archive-Browser + Save-Editor (v0.4). Setup via Host-Wizard '🎮 Ordner mit Spielen scannen'. Sub-Path-Rotation für Updates, F95zone-Login mit verschlüsselten Session-Cookies.",
   "assembly": "KroModIx.Plugin.RenPyAssist.dll",
   "entryType": "KroModIx.Plugin.RenPyAssist.RenPyAssistPlugin",
-  "minHostVersion": "1.10.3",
+  "minHostVersion": "1.18.0",
   "targets": [
     {
       "gameId": "renpy-game",

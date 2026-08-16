@@ -156,18 +156,25 @@ public sealed partial class RenPyGameViewModel : ObservableObject
         Dispatcher.UIThread.Post(() => AnimatedCoverSource = gifSrc);
     }
 
-    private void TrySetCoverFromFile(string? path)
+    private async void TrySetCoverFromFile(string? path)
     {
-        Dispatcher.UIThread.Post(() =>
+        try
         {
-            try
+            if (path is null || !File.Exists(path))
             {
-                if (path is null || !File.Exists(path)) { Cover = null; return; }
-                using var s = File.OpenRead(path);
-                Cover = new Bitmap(s);
+                await Dispatcher.UIThread.InvokeAsync(() => Cover = null);
+                return;
             }
-            catch { Cover = null; }
-        });
+            // v0.15.0: zentraler Host-Baukasten IHostServices.Images
+            // (Contracts v1.18+). GIF-Cover-Sonderfall bleibt UNBERUEHRT
+            // (siehe AnimatedCoverSource oben — IGifSource-Pfad).
+            var bmp = await _host.Images.DecodeFileAsync(path);
+            await Dispatcher.UIThread.InvokeAsync(() => Cover = bmp);
+        }
+        catch
+        {
+            await Dispatcher.UIThread.InvokeAsync(() => Cover = null);
+        }
     }
 
     private async Task LoadDescriptionAsync()

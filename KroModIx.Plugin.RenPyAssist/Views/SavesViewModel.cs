@@ -118,8 +118,12 @@ public sealed partial class SavesViewModel : ObservableObject
                 });
                 if (bytes is null) return (SaveRow?)null;
                 Bitmap? thumb = null;
-                try { using var s = new MemoryStream(bytes); thumb = new Bitmap(s); }
+                // v0.15.0: Host-Baukasten IHostServices.Images (Contracts v1.18+)
+                // fuer Screenshot-Thumbnails — Ren'Py-Saves koennen JPEG oder PNG
+                // enthalten, Format-Detection macht der Host.
+                try { thumb = await _host.Images.DecodeAsync(bytes); }
                 catch { return null; }
+                if (thumb is null) return null;
                 var row = Saves.FirstOrDefault(r =>
                     string.Equals(r.FullPath, fi.FullName, StringComparison.Ordinal));
                 if (row is null || thumb is null) return null;
@@ -181,13 +185,14 @@ public sealed partial class SavesViewModel : ObservableObject
         foreach (var v in matches) Variables.Add(v);
     }
 
-    private void LoadScreenshot(byte[] bytes)
+    private async void LoadScreenshot(byte[] bytes)
     {
         try
         {
-            using var s = new MemoryStream(bytes);
-            var bmp = new Bitmap(s);
-            Dispatcher.UIThread.Post(() => Screenshot = bmp);
+            // v0.15.0: Host-Baukasten IHostServices.Images (Contracts v1.18+).
+            var bmp = await _host.Images.DecodeAsync(bytes);
+            if (bmp is null) return;
+            await Dispatcher.UIThread.InvokeAsync(() => Screenshot = bmp);
         }
         catch { }
     }

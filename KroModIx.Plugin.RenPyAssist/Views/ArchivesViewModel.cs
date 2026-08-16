@@ -215,13 +215,16 @@ public sealed partial class ArchivesViewModel : ObservableObject
         finally { IsBusy = false; }
     }
 
-    private void LoadBitmap(byte[] bytes)
+    private async void LoadBitmap(byte[] bytes)
     {
         try
         {
-            using var s = new MemoryStream(bytes);
-            var bmp = new Bitmap(s);
-            Dispatcher.UIThread.Post(() => PreviewImage = bmp);
+            // v0.15.0: zentraler Host-Baukasten IHostServices.Images
+            // (Contracts v1.18+). Deckt WebP/AVIF/DDS zusaetzlich zu PNG/JPEG
+            // ab — RPA-Archive koennen alles moegliche enthalten.
+            var bmp = await _host.Images.DecodeAsync(bytes);
+            if (bmp is null) { PreviewInfo += Strings.T("status.preview_image_decode_fail"); return; }
+            await Dispatcher.UIThread.InvokeAsync(() => PreviewImage = bmp);
         }
         catch { PreviewInfo += Strings.T("status.preview_image_decode_fail"); }
     }
@@ -252,8 +255,12 @@ public sealed partial class ArchivesViewModel : ObservableObject
             await foreach (var jpeg in _preview.StreamFramesAsync(path, fps: 12, ct))
             {
                 ct.ThrowIfCancellationRequested();
-                Bitmap bmp;
-                using (var ms = new MemoryStream(jpeg)) bmp = new Bitmap(ms);
+                // v0.15.0: Host-Baukasten IHostServices.Images (Contracts v1.18+).
+                // ffmpeg-MJPEG-Frames sind reine JPEGs — Avalonia kann sie nativ,
+                // der Host-Decoder ist hier semantisch aequivalent aber konsistent
+                // mit allen anderen Bitmap-Decode-Stellen.
+                var bmp = await _host.Images.DecodeAsync(jpeg, ct);
+                if (bmp is null) continue;
                 await Dispatcher.UIThread.InvokeAsync(() => PreviewImage = bmp);
             }
         }

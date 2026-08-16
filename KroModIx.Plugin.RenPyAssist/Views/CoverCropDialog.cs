@@ -7,6 +7,7 @@ using Avalonia.Input;
 using Avalonia.Layout;
 using Avalonia.Media;
 using Avalonia.Media.Imaging;
+using KroModIx.Plugin.Contracts;
 using KroModIx.Plugin.RenPyAssist.Services;
 using SixLabors.ImageSharp;
 using SixLabors.ImageSharp.Formats.Png;
@@ -29,6 +30,7 @@ public sealed class CoverCropDialog : Window
 
     private readonly string _sourceImagePath;
     private readonly string _outputPath;
+    private readonly IHostServices _host;
     public Action<string>? OnCropSaved { get; set; }
 
     private readonly Avalonia.Controls.Image _preview;
@@ -47,10 +49,11 @@ public sealed class CoverCropDialog : Window
     private Avalonia.Point _dragStart;
     private Avalonia.Point _selStartPos;
 
-    public CoverCropDialog(string sourceImagePath, string outputPath)
+    public CoverCropDialog(string sourceImagePath, string outputPath, IHostServices host)
     {
         _sourceImagePath = sourceImagePath;
         _outputPath = outputPath;
+        _host = host;
 
         Title = Strings.T("crop.title");
         Width = 900;
@@ -147,12 +150,15 @@ public sealed class CoverCropDialog : Window
         LoadImage();
     }
 
-    private void LoadImage()
+    private async void LoadImage()
     {
         try
         {
-            using var s = File.OpenRead(_sourceImagePath);
-            var bmp = new Bitmap(s);
+            // v0.15.0: zentraler Host-Baukasten IHostServices.Images
+            // (Contracts v1.18+) — deckt auch WebP/AVIF/DDS ab, falls das
+            // Cover in einem exotischen Format vorliegt.
+            var bmp = await _host.Images.DecodeFileAsync(_sourceImagePath);
+            if (bmp is null) throw new InvalidOperationException("decode failed");
             _preview.Source = bmp;
             _imgW = bmp.PixelSize.Width;
             _imgH = bmp.PixelSize.Height;

@@ -1,8 +1,8 @@
 <Project>
   <ItemGroup>
-    <!-- v1.10.3: IHostServices.TryRenameManualGame — Plugin kann Container-
-         Ordner umbenennen, Host re-keyed Sidebar-Kachel + Manual-Games-Store. -->
-    <PackageVersion Include="KroModIx.Plugin.Contracts" Version="1.10.3" />
+    <!-- v1.18.0: IHostServices.Images (zentraler Bild-Decoder-Baukasten,
+         WebP/AVIF/DDS-Fallbacks + Thread-Affinity). -->
+    <PackageVersion Include="KroModIx.Plugin.Contracts" Version="1.18.0" />
     <PackageVersion Include="Avalonia" Version="12.1.0" />
     <PackageVersion Include="CommunityToolkit.Mvvm" Version="8.4.2" />
     <PackageVersion Include="MinVer" Version="7.0.0" />

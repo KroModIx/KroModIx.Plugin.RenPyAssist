@@ -212,7 +212,7 @@ public sealed partial class GameSettingsViewModel : ObservableObject
             return;
         }
         var outputPath = GameLocalStore.SidebarCoverPath(_containerPath);
-        var dialog = new CoverCropDialog(src, outputPath)
+        var dialog = new CoverCropDialog(src, outputPath, _host)
         {
             OnCropSaved = path =>
             {
