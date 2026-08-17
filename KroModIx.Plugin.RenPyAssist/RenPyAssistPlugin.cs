@@ -25,10 +25,15 @@ public sealed class RenPyAssistPlugin : IGameModPlugin, IUpdateNotifier, IGameLa
     public PluginMetadata Metadata { get; } = new(
         Id: "kroste.renpyassist",
         DisplayName: "Ren'Py Assist",
-        Version: "0.15.0",
+        Version: "0.16.0",
         Author: "Kroste",
         Description: "Verwaltet Ren'Py-Spiele als eigenständige Sidebar-Kacheln " +
-            "(Multi-Tile). v0.15.0: Bitmap-Decode via zentralem Host-Baukasten IHostServices.Images (Contracts v1.18) — RPA-Archive-Preview, Save-Screenshot-Thumbnails, Cover-Crop-Dialog und Detail-View-Cover teilen sich die Format-Chain des Hosts (PNG/JPEG/BMP/GIF/WebP/AVIF/DDS). GIF-Cover-Sonderfall (IGifSource) bleibt unberuehrt. v0.14.1: GIF-Cover-Guard im CoverCache. v0.14.0: DE+EN-Uebersetzung aller User-facing Strings. " +
+            "(Multi-Tile). v0.16.0: KrosteTranslationGenerator schreibt Language-Activator " +
+            "(krostemod_language_activator_<lang>.rpy im Game-Root) — aktiviert die Sprache " +
+            "beim ersten Start + Overlay-Button unten rechts. Fixt Games mit hartcodiertem " +
+            "Language-Cycle (SteamCity, viele Community-Renpy-Projekte), die den tl/<lang>/-" +
+            "Ordner ignoriert haben weil kein UI-Button existierte. v0.15.0: Bitmap-Decode via " +
+            "IHostServices.Images. v0.14.1: GIF-Cover-Guard. v0.14.0: DE+EN. " +
             "Setup via Host-Wizard '🎮 Ordner mit Spielen scannen' " +
             "→ Host legt pro Ren'Py-Container eine Kachel mit engine=renpy an, " +
             "Plugin übernimmt. Sub-Path-Rotation für Updates, game/saves/ bleibt " +
