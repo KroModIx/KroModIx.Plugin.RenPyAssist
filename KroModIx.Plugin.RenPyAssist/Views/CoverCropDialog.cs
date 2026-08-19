@@ -37,6 +37,7 @@ public sealed class CoverCropDialog : Window
     private readonly Avalonia.Controls.Shapes.Rectangle _selection;
     private readonly Slider _zoomSlider;
     private readonly TextBlock _statusText;
+    private readonly Canvas _canvas;
 
     private double _imgW, _imgH; // original image px
     private double _dispW, _dispH; // displayed image px in Canvas
@@ -73,11 +74,11 @@ public sealed class CoverCropDialog : Window
             IsHitTestVisible = true,
         };
 
-        var canvas = new Canvas { Background = Brushes.Transparent };
-        canvas.Children.Add(_preview);
-        canvas.Children.Add(_selection);
+        _canvas = new Canvas { Background = Brushes.Transparent };
+        _canvas.Children.Add(_preview);
+        _canvas.Children.Add(_selection);
 
-        canvas.SizeChanged += (_, _) => LayoutContent(canvas);
+        _canvas.SizeChanged += (_, _) => LayoutContent(_canvas);
         _selection.PointerPressed += OnSelectionPressed;
         _selection.PointerMoved += OnSelectionMoved;
         _selection.PointerReleased += (_, _) => _dragging = false;
@@ -144,7 +145,7 @@ public sealed class CoverCropDialog : Window
         DockPanel.SetDock(footer, Dock.Bottom);
         root.Children.Add(topInfo);
         root.Children.Add(footer);
-        root.Children.Add(canvas);
+        root.Children.Add(_canvas);
         Content = root;
 
         LoadImage();
@@ -162,6 +163,14 @@ public sealed class CoverCropDialog : Window
             _preview.Source = bmp;
             _imgW = bmp.PixelSize.Width;
             _imgH = bmp.PixelSize.Height;
+
+            // Race-Fix: SizeChanged des Canvas ist typischerweise schon
+            // gefeuert BEVOR das async Bitmap-Load zurueckkommt. Ohne
+            // expliziten Re-Layout bleibt _selection Width/Height = 0 und
+            // der goldene Rahmen ist unsichtbar. Deshalb hier nochmal
+            // triggern sobald das Bild wirklich da ist.
+            if (_canvas.Bounds.Width > 0 && _canvas.Bounds.Height > 0)
+                LayoutContent(_canvas);
         }
         catch (Exception ex)
         {

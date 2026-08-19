@@ -25,10 +25,13 @@ public sealed class RenPyAssistPlugin : IGameModPlugin, IUpdateNotifier, IGameLa
     public PluginMetadata Metadata { get; } = new(
         Id: "kroste.renpyassist",
         DisplayName: "Ren'Py Assist",
-        Version: "0.16.0",
+        Version: "0.16.1",
         Author: "Kroste",
         Description: "Verwaltet Ren'Py-Spiele als eigenständige Sidebar-Kacheln " +
-            "(Multi-Tile). v0.16.0: KrosteTranslationGenerator schreibt Language-Activator " +
+            "(Multi-Tile). v0.16.1: Cover-Crop-Dialog goldener Rahmen ist wieder " +
+            "sichtbar — Race-Condition zwischen async Bitmap-Load und Canvas-" +
+            "SizeChanged behoben (LayoutContent wird nach Bitmap-Decode explizit " +
+            "nachgezogen wenn Canvas bereits Bounds hat). v0.16.0: KrosteTranslationGenerator schreibt Language-Activator " +
             "(krostemod_language_activator_<lang>.rpy im Game-Root) — aktiviert die Sprache " +
             "beim ersten Start + Overlay-Button unten rechts. Fixt Games mit hartcodiertem " +
             "Language-Cycle (SteamCity, viele Community-Renpy-Projekte), die den tl/<lang>/-" +
