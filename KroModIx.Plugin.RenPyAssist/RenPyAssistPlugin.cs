@@ -25,10 +25,14 @@ public sealed class RenPyAssistPlugin : IGameModPlugin, IUpdateNotifier, IGameLa
     public PluginMetadata Metadata { get; } = new(
         Id: "kroste.renpyassist",
         DisplayName: "Ren'Py Assist",
-        Version: "0.16.1",
+        Version: "0.16.2",
         Author: "Kroste",
         Description: "Verwaltet Ren'Py-Spiele als eigenständige Sidebar-Kacheln " +
-            "(Multi-Tile). v0.16.1: Cover-Crop-Dialog goldener Rahmen ist wieder " +
+            "(Multi-Tile). v0.16.2: Auto-Chmod vor Launch — setzt +x auf .sh + " +
+            "lib/py*-linux-*/-Binaries (Ren'Py-Spiele als ZIP von Windows " +
+            "entpackt haben oft keine Unix-Exec-Bits, Launcher scheitert dann " +
+            "mit Permission-denied). Best-effort, Fehler nur ins Log. " +
+            "v0.16.1: Cover-Crop-Dialog goldener Rahmen ist wieder " +
             "sichtbar — Race-Condition zwischen async Bitmap-Load und Canvas-" +
             "SizeChanged behoben (LayoutContent wird nach Bitmap-Decode explizit " +
             "nachgezogen wenn Canvas bereits Bounds hat). v0.16.0: KrosteTranslationGenerator schreibt Language-Activator " +
@@ -295,6 +299,14 @@ public sealed class RenPyAssistPlugin : IGameModPlugin, IUpdateNotifier, IGameLa
             return Task.FromResult(true); // wir sind zuständig, keine Host-Fallback-Chance
         }
 
+        // v0.16.2: Ren'Py-Spiele als ZIP von Windows → unter Linux entpackt
+        // verlieren die +x-Bits auf lib/py3-linux-*/{CheatingWitches,python,
+        // pythonw,librenpython.so,zsync,zsyncmake}. Das .sh-Skript scheitert
+        // dann mit „Permission denied" in Zeile 63. Vor dem Start best-effort
+        // die Bits nachziehen — kostet Millisekunden, spart dem User den
+        // manuellen chmod-Roundtrip fuer jedes ZIP-Game.
+        EnsureLinuxExecutableBits(dir, _host.Logger);
+
         try
         {
             System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(launcher)
@@ -323,6 +335,49 @@ public sealed class RenPyAssistPlugin : IGameModPlugin, IUpdateNotifier, IGameLa
             return System.IO.Directory.EnumerateFiles(dir, "*.sh").FirstOrDefault();
         return System.IO.Directory.EnumerateFiles(dir, "*.exe")
             .FirstOrDefault(f => !f.EndsWith("python.exe", StringComparison.OrdinalIgnoreCase));
+    }
+
+    /// <summary>v0.16.2: setzt +x auf alle Ren'Py-Runtime-Binaries im
+    /// Sub-Ordner (Linux-only). Deckt den haeufigen Fall dass ein Ren'Py-
+    /// Spiel als ZIP unter Windows gepackt und unter Linux entpackt wurde
+    /// — dabei gehen die Unix-Permissions verloren und das .sh-Skript
+    /// scheitert mit „Permission denied". Best-effort: Fehler nur ins
+    /// Debug-Log, Launcher-Start laeuft trotzdem (vielleicht klappt's
+    /// auch ohne alle Bits — z.B. wenn nur eine Datei betroffen ist).</summary>
+    private static void EnsureLinuxExecutableBits(string dir, NLog.Logger log)
+    {
+        if (!OperatingSystem.IsLinux()) return;
+        // Alle .sh im Sub-Ordner + alle Files unter lib/py*-linux-*/.
+        // Nur mit +x behandeln wenn's noch nicht gesetzt ist (spart Syscalls
+        // bei bereits gefixten Spielen).
+        var candidates = new System.Collections.Generic.List<string>();
+        try
+        {
+            candidates.AddRange(System.IO.Directory.EnumerateFiles(dir, "*.sh"));
+            var libDir = System.IO.Path.Combine(dir, "lib");
+            if (System.IO.Directory.Exists(libDir))
+            {
+                foreach (var pyDir in System.IO.Directory.EnumerateDirectories(libDir, "py*-linux-*"))
+                    candidates.AddRange(System.IO.Directory.EnumerateFiles(pyDir));
+            }
+        }
+        catch (Exception ex) { log.Debug(ex, "EnsureLinuxExec: Enumerate fehlgeschlagen: {Dir}", dir); return; }
+
+        const UnixFileMode ExecBits = UnixFileMode.UserExecute
+            | UnixFileMode.GroupExecute | UnixFileMode.OtherExecute;
+        int patched = 0;
+        foreach (var f in candidates)
+        {
+            try
+            {
+                var mode = System.IO.File.GetUnixFileMode(f);
+                if ((mode & UnixFileMode.UserExecute) != 0) continue; // schon ok
+                System.IO.File.SetUnixFileMode(f, mode | ExecBits);
+                patched++;
+            }
+            catch (Exception ex) { log.Debug(ex, "EnsureLinuxExec: chmod fehlgeschlagen: {File}", f); }
+        }
+        if (patched > 0) log.Info("EnsureLinuxExec: +x auf {N} Datei(en) gesetzt in {Dir}", patched, dir);
     }
 
     // ---- Tab-Contributions ----
