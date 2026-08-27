@@ -36,11 +36,22 @@ public sealed class GameSettingsView : UserControl
         var threadBox = new TextBox { PlaceholderText = Strings.T("placeholder.thread_url") };
         threadBox.Bind(TextBox.TextProperty, new Binding(nameof(GameSettingsViewModel.ThreadUrlDraft))
         { Mode = BindingMode.TwoWay });
-        var saveThreadBtn = new Button { Content = Strings.T("btn.save_thread"),
-            Margin = new Thickness(0, 6, 0, 0),
-            HorizontalAlignment = HorizontalAlignment.Left };
+        var saveThreadBtn = new Button { Content = Strings.T("btn.save_thread") };
         saveThreadBtn.Classes.Add("accent");
         saveThreadBtn.Bind(Button.CommandProperty, new Binding(nameof(GameSettingsViewModel.SaveThreadUrlCommand)));
+        // v0.17: direkt neben Speichern — Link pruefen ohne Copy-Paste in den
+        // Browser. IsEnabled kommt ueber CanExecute (Draft ODER gespeicherte URL).
+        var openThreadBtn = new Button { Content = Strings.T("btn.open_thread") };
+        openThreadBtn.Classes.Add("ghost");
+        openThreadBtn.Bind(Button.CommandProperty, new Binding(nameof(GameSettingsViewModel.OpenThreadCommand)));
+        ToolTip.SetTip(openThreadBtn, Strings.T("tooltip.open_thread"));
+        var threadBtnRow = new StackPanel
+        {
+            Orientation = Orientation.Horizontal, Spacing = 8,
+            Margin = new Thickness(0, 6, 0, 0),
+            HorizontalAlignment = HorizontalAlignment.Left,
+            Children = { saveThreadBtn, openThreadBtn },
+        };
         var lastChecked = new TextBlock { FontSize = 11, Margin = new Thickness(0, 6, 0, 0) };
         lastChecked.Classes.Add("secondary");
         lastChecked.Bind(TextBlock.TextProperty, new Binding(nameof(GameSettingsViewModel.LastCheckedText)));
@@ -173,7 +184,7 @@ public sealed class GameSettingsView : UserControl
                 Children =
                 {
                     gameTitle,
-                    threadLabel, threadHelp, threadBox, saveThreadBtn, lastChecked,
+                    threadLabel, threadHelp, threadBox, threadBtnRow, lastChecked,
                     actionLabel, actionsRow, gameStatus, containerHint,
                     globalHeader,
                     dlLabel, dlRow,

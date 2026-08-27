@@ -33,7 +33,9 @@ public sealed partial class GameSettingsViewModel : ObservableObject
     private RenPyGame _game;
 
     // Spiel-spezifisch
-    [ObservableProperty] private string _threadUrlDraft = "";
+    [ObservableProperty]
+    [NotifyCanExecuteChangedFor(nameof(OpenThreadCommand))]
+    private string _threadUrlDraft = "";
     [ObservableProperty] private string _gameStatus = "";
     [ObservableProperty] private bool _isBusy;
 
@@ -94,6 +96,30 @@ public sealed partial class GameSettingsViewModel : ObservableObject
     }
 
     // ---- Spiel-spezifische Actions ----
+
+    /// <summary>v0.17: Thread direkt aus den Einstellungen oeffnen — ohne
+    /// URL-Copy-Paste in den Browser. Nimmt bewusst den Draft-Text und nicht
+    /// nur die gespeicherte URL, damit ein frisch eingefuegter Link sofort
+    /// pruefbar ist ("ist das der richtige Thread?") bevor gespeichert wird.</summary>
+    [RelayCommand(CanExecute = nameof(CanOpenThread))]
+    private void OpenThread()
+    {
+        var url = LooksLikeUrl(ThreadUrlDraft) ? ThreadUrlDraft.Trim() : _game.ThreadUrl;
+        if (string.IsNullOrWhiteSpace(url)) return;
+        _host.Logger.Info("Öffne f95zone-Thread: {Url}", url);
+        _host.Shell.OpenExternalUrl(url!);
+    }
+
+    private bool CanOpenThread => LooksLikeUrl(ThreadUrlDraft)
+        || LooksLikeUrl(_game.ThreadUrl);
+
+    private static bool LooksLikeUrl(string? value)
+    {
+        var v = value?.Trim();
+        return !string.IsNullOrEmpty(v)
+            && (v.StartsWith("http://", StringComparison.OrdinalIgnoreCase)
+                || v.StartsWith("https://", StringComparison.OrdinalIgnoreCase));
+    }
 
     [RelayCommand]
     private async Task SaveThreadUrlAsync()

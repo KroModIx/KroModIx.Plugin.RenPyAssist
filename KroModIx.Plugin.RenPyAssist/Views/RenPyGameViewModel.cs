@@ -72,7 +72,24 @@ public sealed partial class RenPyGameViewModel : ObservableObject
         ? Strings.T("status.update_badge")
         : string.Format(Strings.T("status.update_badge_with_version"), _game.LastRemoteVersion);
     public bool HasThread => !string.IsNullOrWhiteSpace(_game.ThreadUrl);
+    /// <summary>Roh-URL für den Tooltip des Thread-Buttons — der User sieht
+    /// beim Hovern wohin der Klick geht, ohne in die Einstellungen zu wechseln.</summary>
+    public string ThreadUrl => _game.ThreadUrl ?? "";
     public string NoThreadHint => Strings.T("status.no_thread_hint");
+
+    /// <summary>v0.17: Ein-Klick-Weg zum f95zone-Thread direkt aus der
+    /// Übersicht. Vorher war der Thread nur über den Einstellungen-Tab
+    /// (Copy-Paste der URL) oder den Update-Doppelklick auf der Sidebar-
+    /// Kachel erreichbar — beides zu umständlich für den Normalfall
+    /// „schnell im Thread nachlesen".</summary>
+    [RelayCommand]
+    private void OpenThread()
+    {
+        var url = _game.ThreadUrl;
+        if (string.IsNullOrWhiteSpace(url)) return;
+        _host.Logger.Info("Öffne f95zone-Thread: {Url}", url);
+        _host.Shell.OpenExternalUrl(url!);
+    }
 
     private void RefreshFromRegistry()
     {
@@ -92,6 +109,7 @@ public sealed partial class RenPyGameViewModel : ObservableObject
         OnPropertyChanged(nameof(HasUpdate));
         OnPropertyChanged(nameof(UpdateBadgeText));
         OnPropertyChanged(nameof(HasThread));
+        OnPropertyChanged(nameof(ThreadUrl));
         Genres.Clear();
         foreach (var g in _game.Genres) Genres.Add(g);
     }

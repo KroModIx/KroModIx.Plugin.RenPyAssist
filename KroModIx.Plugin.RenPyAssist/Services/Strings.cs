@@ -64,6 +64,7 @@ public static class Strings
         ["btn.rename_folder"] = "✏  Ordner umbenennen",
         ["btn.choose_sidebar_crop"] = "🖼  Sidebar-Ausschnitt wählen",
         ["btn.save_thread"] = "💾  Thread speichern & prüfen",
+        ["btn.open_thread"] = "🔗  Thread öffnen",
         ["btn.save_global"] = "💾  Global-Einstellungen speichern",
         ["btn.login"] = "🔐  Einloggen",
         ["btn.logout"] = "🚪  Cookies löschen",
@@ -88,6 +89,9 @@ public static class Strings
         ["tooltip.choose_crop"] =
             "Öffnet einen Dialog mit dem Original-Cover — verschiebe den 2:3-Rahmen " +
             "und speichere. Der Ausschnitt landet als Sidebar-Kachel.",
+        ["tooltip.open_thread"] =
+            "Öffnet den verknüpften f95zone-Thread im Standard-Browser. "
+            + "Ohne verknüpften Thread inaktiv — Link in den Einstellungen (⚙) eintragen.",
         ["tooltip.inline_play"] = "MJPEG-Frame-Stream via ffmpeg (kein Audio, 12 fps)",
         ["tooltip.inline_stop"] = "Inline-Wiedergabe stoppen",
         ["tooltip.open_external"] = "Im System-Default-Player öffnen (VLC/mpv/…)",
@@ -373,6 +377,7 @@ public static class Strings
         ["btn.rename_folder"] = "✏  Rename folder",
         ["btn.choose_sidebar_crop"] = "🖼  Choose sidebar crop",
         ["btn.save_thread"] = "💾  Save thread & check",
+        ["btn.open_thread"] = "🔗  Open thread",
         ["btn.save_global"] = "💾  Save global settings",
         ["btn.login"] = "🔐  Log in",
         ["btn.logout"] = "🚪  Clear cookies",
@@ -397,6 +402,9 @@ public static class Strings
         ["tooltip.choose_crop"] =
             "Opens a dialog with the original cover — drag the 2:3 frame " +
             "and save. The crop becomes the sidebar tile.",
+        ["tooltip.open_thread"] =
+            "Opens the linked f95zone thread in the default browser. "
+            + "Disabled without a linked thread — enter the link in settings (⚙).",
         ["tooltip.inline_play"] = "MJPEG frame stream via ffmpeg (no audio, 12 fps)",
         ["tooltip.inline_stop"] = "Stop inline playback",
         ["tooltip.open_external"] = "Open in the system default player (VLC/mpv/…)",

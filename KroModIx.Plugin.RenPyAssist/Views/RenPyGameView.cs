@@ -67,6 +67,24 @@ public sealed class RenPyGameView : UserControl
         subPath.Classes.Add("secondary");
         subPath.Bind(TextBlock.TextProperty, new Binding(nameof(RenPyGameViewModel.SubPathText)));
 
+        // --- Thread-Button (v0.17): Ein-Klick-Weg in den f95zone-Thread.
+        //     Sitzt bewusst weit oben (direkt unter Titel/Version), weil das
+        //     der haeufigste Grund ist die Uebersicht ueberhaupt zu oeffnen.
+        //     Ohne verknuepften Thread ausgeblendet — dort greift der
+        //     NoThreadHint unten. ---
+        var openThreadBtn = new Button
+        {
+            Content = Strings.T("btn.open_thread"),
+            HorizontalAlignment = HorizontalAlignment.Center,
+            Margin = new Thickness(0, 0, 0, 16),
+        };
+        openThreadBtn.Classes.Add("accent");
+        openThreadBtn.Bind(Button.CommandProperty, new Binding(nameof(RenPyGameViewModel.OpenThreadCommand)));
+        openThreadBtn.Bind(Button.IsVisibleProperty, new Binding(nameof(RenPyGameViewModel.HasThread)));
+        var openThreadTip = new ToolTip();
+        openThreadTip.Bind(ContentControl.ContentProperty, new Binding(nameof(RenPyGameViewModel.ThreadUrl)));
+        ToolTip.SetTip(openThreadBtn, openThreadTip);
+
         // --- Cover zentriert (Uniform = kein Crop, komplettes Bild wird
         //     angezeigt; MaxWidth 700, MaxHeight 700 begrenzt sehr breite
         //     Landscape-Cover damit die Seite nicht zu weit wird) ---
@@ -203,7 +221,7 @@ public sealed class RenPyGameView : UserControl
             Margin = new Thickness(24, 32, 24, 24),
             Children =
             {
-                title, updateBadge, versionInfo, subPath,
+                title, updateBadge, versionInfo, subPath, openThreadBtn,
                 coverFallback, coverImage, animatedCover,
                 descHeader, descText, translationHint,
                 genreHeader, genrePanel,
