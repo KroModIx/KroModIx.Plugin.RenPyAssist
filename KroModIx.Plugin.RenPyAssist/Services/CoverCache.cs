@@ -141,15 +141,41 @@ public sealed class CoverCache
     /// wird via <see cref="F95zoneClient"/> (mit Session-Cookies) nach-
     /// geladen. Rückgabe: Pfad zur lokalen Datei oder null. Concurrent
     /// Calls für dieselbe URL warten auf einen einzigen Download.</summary>
-    public Task<string?> EnsureAsync(string coverUrl, CancellationToken ct = default)
+    public async Task<string?> EnsureAsync(string coverUrl, CancellationToken ct = default)
     {
-        if (string.IsNullOrEmpty(coverUrl)) return Task.FromResult<string?>(null);
-        return _inFlight.GetOrAdd(coverUrl, url => EnsureInternalAsync(url, ct)
-            .ContinueWith(t =>
-            {
-                _inFlight.TryRemove(url, out _);
-                return t.Result;
-            }, TaskContinuationOptions.ExecuteSynchronously));
+        if (string.IsNullOrEmpty(coverUrl)) return null;
+        // v0.17.2: der geteilte Download laeuft bewusst OHNE Caller-Token.
+        // Vorher wurde das ct des ERSTEN Callers in den Shared-Task
+        // eingebacken — brach der ab (Tab-Wechsel), bekamen alle spaeteren
+        // Joiner fuer dieselbe URL einen gecancelten Task und das Cover
+        // blieb bis zum Neustart leer. Jetzt haengt jeder Caller nur mit
+        // seinem eigenen Token am gemeinsamen Task (WaitAsync).
+        var shared = _inFlight.GetOrAdd(coverUrl, RunSharedAsync);
+        try
+        {
+            return await shared.WaitAsync(ct).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            // Nur DIESER Caller ist raus — der Download laeuft fuer die
+            // anderen weiter und landet im File-Cache.
+            return null;
+        }
+        catch (Exception ex)
+        {
+            // Frueher lief der Fehler als AggregateException (t.Result) in
+            // einen fire-and-forget-await beim Aufrufer und endete als
+            // UnobservedTaskException. Cover-Fehler sind kein App-Fehler:
+            // loggen, null liefern, Fallback-Icon zeigen.
+            Log.Debug(ex, "Cover-Download fehlgeschlagen: {Url}", coverUrl);
+            return null;
+        }
+    }
+
+    private async Task<string?> RunSharedAsync(string coverUrl)
+    {
+        try { return await EnsureInternalAsync(coverUrl, CancellationToken.None).ConfigureAwait(false); }
+        finally { _inFlight.TryRemove(coverUrl, out _); }
     }
 
     private async Task<string?> EnsureInternalAsync(string coverUrl, CancellationToken ct)
