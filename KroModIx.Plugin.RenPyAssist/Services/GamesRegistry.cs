@@ -228,8 +228,11 @@ public sealed class GamesRegistry
                 new JsonSerializerOptions { WriteIndented = true });
             var tmp = _paths.GamesRegistryPath + ".tmp";
             File.WriteAllText(tmp, json);
-            if (File.Exists(_paths.GamesRegistryPath)) File.Delete(_paths.GamesRegistryPath);
-            File.Move(tmp, _paths.GamesRegistryPath);
+            // v0.17.2: Move mit overwrite statt Delete-dann-Move. Vorher gab
+            // es ein Fenster zwischen Delete und Move, in dem die Registry
+            // GAR NICHT existierte — Crash oder Kill in dem Moment kostet
+            // alle Thread-URLs, Cover und Uebersetzungs-Caches.
+            File.Move(tmp, _paths.GamesRegistryPath, overwrite: true);
         }
         catch (Exception ex)
         {
