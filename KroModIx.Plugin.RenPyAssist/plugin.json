@@ -7,7 +7,7 @@
   "description": "Verwaltet Ren'Py-Spiele als eigenständige Sidebar-Kacheln. v0.17.1: Update-Badge nur noch bei ECHT neuerer Thread-Version — semantischer Versions-Vergleich (0.10 > 0.9, 1.0 == 1.0.0) statt String-Ungleichheit; Sub-Ordner-Wahl im Container sortiert ebenfalls semantisch. v0.17.0: 🔗-Thread-Button — öffnet den verknüpften f95zone-Thread direkt aus der Übersicht (und neben der Thread-URL in den Einstellungen), statt URL-Copy-Paste. v0.16.2: Auto-Chmod vor Launch — setzt +x auf .sh + lib/py*-linux-*/-Binaries (ZIP-von-Windows-Fall, spart manuellen chmod-Roundtrip). v0.16.1: Cover-Crop-Dialog goldener Rahmen ist wieder sichtbar (Race-Condition zwischen async Bitmap-Load und Canvas-SizeChanged behoben). v0.16.0: KrosteTranslationGenerator schreibt jetzt zusaetzlich einen Language-Activator (krostemod_language_activator_<lang>.rpy im Game-Root) — aktiviert die Sprache beim ersten Start automatisch und legt einen Overlay-Button unten rechts an. Fixt Games mit hartcodiertem Language-Cycle (SteamCity, viele Community-Renpy-Projekte), die den tl/<lang>/-Ordner ignoriert haben weil kein UI-Button existierte. v0.15.0: Bitmap-Decode via Host-Baukasten IHostServices.Images. v0.14.0: DE+EN. Ab v0.6: KrosteMod-Pipeline (Walkthrough/Cheat/Rename/Translate). Setup via Host-Wizard '🎮 Ordner mit Spielen scannen'. F95zone-Login, Sub-Path-Rotation.",
   "assembly": "KroModIx.Plugin.RenPyAssist.dll",
   "entryType": "KroModIx.Plugin.RenPyAssist.RenPyAssistPlugin",
-  "minHostVersion": "1.18.0",
+  "minHostVersion": "1.27.0",
   "targets": [
     {
       "gameId": "renpy-game",
