@@ -15,7 +15,7 @@ namespace KroModIx.Plugin.RenPyAssist.Views;
 /// Layout: Titel groß zentriert, Cover darunter zentriert, Beschreibung
 /// (KI-übersetzt in System-Locale, Fallback Original), Genre-Chips.
 /// Actions + Thread-URL sind in den Einstellungen-Tab gewandert.</summary>
-public sealed partial class RenPyGameViewModel : ObservableObject
+public sealed partial class RenPyGameViewModel : ObservableObject, IDisposable
 {
     private readonly GamesRegistry _registry;
     private readonly CoverCache _covers;
@@ -23,6 +23,7 @@ public sealed partial class RenPyGameViewModel : ObservableObject
     private readonly IHostServices _host;
     private readonly string _containerPath;
     private RenPyGame _game;
+    private readonly EventHandler _registryChanged;
 
     [ObservableProperty] private Bitmap? _cover;
     /// <summary>v0.11 / v0.12.3: IGifSource-Instanz für Avalonia.Labs.Gif
@@ -49,7 +50,12 @@ public sealed partial class RenPyGameViewModel : ObservableObject
         _host = host;
         _containerPath = game.ContainerPath;
 
-        _registry.Changed += (_, _) => Dispatcher.UIThread.Post(RefreshFromRegistry);
+        // v0.17.2: Handler als Feld + Dispose. Als Lambda abonniert hielt das
+        // Event diese VM fuer die restliche Session am Leben, nachdem der
+        // Host-Tab-Cache sie verworfen hat — und jede Registry-Aenderung hat
+        // in der Leiche Cover-Reload + KI-Uebersetzung neu angeworfen.
+        _registryChanged = (_, _) => Dispatcher.UIThread.Post(RefreshFromRegistry);
+        _registry.Changed += _registryChanged;
         RefreshVisibleFields();
         _ = LoadCoverAsync();
         _ = LoadDescriptionAsync();
@@ -90,6 +96,8 @@ public sealed partial class RenPyGameViewModel : ObservableObject
         _host.Logger.Info("Öffne f95zone-Thread: {Url}", url);
         _host.Shell.OpenExternalUrl(url!);
     }
+
+    public void Dispose() => _registry.Changed -= _registryChanged;
 
     private void RefreshFromRegistry()
     {

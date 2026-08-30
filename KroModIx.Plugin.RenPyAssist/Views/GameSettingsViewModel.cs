@@ -15,7 +15,7 @@ namespace KroModIx.Plugin.RenPyAssist.Views;
 /// Actions (Thread-URL, Play, Update installieren, Ordner, Prüfen) mit den
 /// plugin-globalen Settings (f95zone-Login, Downloads-Watch-Ordner, Poll-
 /// Intervall) — alles was in v0.4 in der Detail-View war ist hier drin.</summary>
-public sealed partial class GameSettingsViewModel : ObservableObject
+public sealed partial class GameSettingsViewModel : ObservableObject, IDisposable
 {
     private readonly GamesRegistry _registry;
     private readonly RenPySettingsService _settings;
@@ -31,6 +31,7 @@ public sealed partial class GameSettingsViewModel : ObservableObject
     private string _containerPath;
 
     private RenPyGame _game;
+    private readonly EventHandler _registryChanged;
 
     // Spiel-spezifisch
     [ObservableProperty]
@@ -74,8 +75,13 @@ public sealed partial class GameSettingsViewModel : ObservableObject
         _f95Username = _settings.Current.F95Username;
         UpdateLoginStatus();
 
-        _registry.Changed += (_, _) => Dispatcher.UIThread.Post(RefreshFromRegistry);
+        // v0.17.2: siehe RenPyGameViewModel — Handler-Feld statt Lambda,
+        // damit der Host beim Verwerfen des Tabs abmelden kann.
+        _registryChanged = (_, _) => Dispatcher.UIThread.Post(RefreshFromRegistry);
+        _registry.Changed += _registryChanged;
     }
+
+    public void Dispose() => _registry.Changed -= _registryChanged;
 
     private void RefreshFromRegistry()
     {
