@@ -200,6 +200,16 @@ public sealed partial class ModsViewModel : ObservableObject
         }
     }
 
+    /// <summary>Wirft, wenn ein blockierender UI-Hop versehentlich vom
+    /// UI-Thread aufgerufen wird — das waere ein Deadlock ohne Fehlermeldung.</summary>
+    private static void EnsureWorkerThread(string caller)
+    {
+        if (!Dispatcher.UIThread.CheckAccess()) return;
+        throw new InvalidOperationException(
+            $"{caller} blockiert auf dem UI-Thread — das ist ein Deadlock. " +
+            "Der Aufruf gehoert in den Task.Run des Build-Ablaufs.");
+    }
+
     private static Avalonia.Controls.Window? MainWindow()
     {
         return Avalonia.Application.Current?.ApplicationLifetime
