@@ -75,9 +75,14 @@ public sealed class RenPyGame
     [JsonIgnore]
     public string DisplayName => !string.IsNullOrWhiteSpace(DisplayNameOverride) ? DisplayNameOverride! : Name;
 
-    /// <summary>Hat der Remote-Thread eine neuere Version als lokal?</summary>
+    /// <summary>Hat der Remote-Thread eine ECHT neuere Version als lokal?
+    ///
+    /// <para>v0.17.1: vorher reichte String-Ungleichheit — damit meldete das
+    /// Plugin auch dann ein Update, wenn die lokale Version neuer war als die
+    /// im Thread (real: lokal <c>0.5</c>, Thread <c>0.4.5</c>), oder wenn sich
+    /// nur die Schreibweise unterschied (<c>v0.5</c>/<c>0.5</c>,
+    /// <c>1.0</c>/<c>1.0.0</c>). Jetzt entscheidet
+    /// <see cref="VersionCompare"/> semantisch.</para></summary>
     [JsonIgnore]
-    public bool HasUpdate => !string.IsNullOrWhiteSpace(LastRemoteVersion)
-                          && !string.IsNullOrWhiteSpace(LocalVersion)
-                          && !string.Equals(LastRemoteVersion, LocalVersion, StringComparison.OrdinalIgnoreCase);
+    public bool HasUpdate => VersionCompare.IsRemoteNewer(LastRemoteVersion, LocalVersion);
 }

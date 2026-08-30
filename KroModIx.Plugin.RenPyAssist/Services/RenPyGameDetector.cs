@@ -86,7 +86,10 @@ public static class RenPyGameDetector
         var candidates = Directory.EnumerateDirectories(containerDir)
             .Where(HasGameFolder)
             .Select(d => new { Dir = d, Version = ExtractVersion(Path.GetFileName(d)) })
-            .OrderByDescending(x => x.Version ?? "", System.StringComparer.OrdinalIgnoreCase)
+            // v0.17.1: semantisch sortieren statt lexikografisch — sonst
+            // gewinnt "0.9" gegen "0.10" und der Container meldet die falsche
+            // (aeltere) Version als aktiv.
+            .OrderByDescending(x => x.Version, VersionCompare.Comparer)
             .ToList();
 
         if (candidates.Count == 0) return (null, null);

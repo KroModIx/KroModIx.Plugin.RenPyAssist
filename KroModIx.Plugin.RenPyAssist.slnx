@@ -1,3 +1,4 @@
 <Solution>
   <Project Path="KroModIx.Plugin.RenPyAssist/KroModIx.Plugin.RenPyAssist.csproj" />
+  <Project Path="KroModIx.Plugin.RenPyAssist.Tests/KroModIx.Plugin.RenPyAssist.Tests.csproj" />
 </Solution>

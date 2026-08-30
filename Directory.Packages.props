@@ -15,5 +15,9 @@
          Avalonia-Labs-Fork, passt zu Avalonia 12. Sidebar-Kachel bleibt
          weiter Bitmap (repraesentatives Frame via ffmpeg-thumbnail). -->
     <PackageVersion Include="Avalonia.Labs.Gif" Version="12.0.2" />
+    <!-- Tests (v0.17.1+) -->
+    <PackageVersion Include="xunit.v3" Version="3.2.2" />
+    <PackageVersion Include="xunit.runner.visualstudio" Version="3.1.5" />
+    <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="18.8.1" />
   </ItemGroup>
 </Project>
