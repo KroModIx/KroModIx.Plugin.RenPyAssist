@@ -6,6 +6,7 @@ using System.Net.Http;
 using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
+using KroModIx.Plugin.Contracts;
 
 namespace KroModIx.Plugin.RenPyAssist.Services;
 
@@ -35,16 +36,22 @@ public sealed class F95zoneClient : IDisposable
     private readonly HttpClientHandler _handler;
     private readonly CookieContainer _cookies;
 
-    public F95zoneClient()
+    /// <param name="host">Wenn gesetzt, kommt der Handler aus der Host-
+    /// Factory und ist damit proxy-konfiguriert — wichtig auf dem
+    /// verwalteten Arbeitslaptop (Sophos). Vorher baute dieser Client seinen
+    /// Handler selbst und umging das Proxy-Handling komplett, weil
+    /// CreateHttpClient weder CookieContainer noch Browser-UA zulaesst.
+    /// Contracts v1.27 hat dafuer CreateHttpClientHandler.</param>
+    public F95zoneClient(IHostServices? host = null)
     {
         _cookies = new CookieContainer();
-        _handler = new HttpClientHandler
+        _handler = host?.CreateHttpClientHandler(_cookies) ?? new HttpClientHandler
         {
             CookieContainer = _cookies,
             UseCookies = true,
-            AllowAutoRedirect = true,
-            AutomaticDecompression = DecompressionMethods.All,
         };
+        _handler.AllowAutoRedirect = true;
+        _handler.AutomaticDecompression = DecompressionMethods.All;
         _http = new HttpClient(_handler) { BaseAddress = new Uri(BaseUrl) };
         _http.DefaultRequestHeaders.UserAgent.ParseAdd(UserAgent);
         _http.DefaultRequestHeaders.AcceptLanguage.ParseAdd("en-US,en;q=0.9");

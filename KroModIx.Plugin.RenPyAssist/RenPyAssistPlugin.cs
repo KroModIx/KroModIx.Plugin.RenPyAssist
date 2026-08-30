@@ -87,7 +87,7 @@ public sealed class RenPyAssistPlugin : IGameModPlugin, IUpdateNotifier, IGameLa
         _paths = new RenPyPaths(host);
         _settings = new RenPySettingsService(_paths);
         _registry = new GamesRegistry(_paths);
-        _f95 = new F95zoneClient();
+        _f95 = new F95zoneClient(host);
         _sessionStore = new F95zoneSessionStore(_paths.F95zoneCookiesPath, host.Secrets);
         _covers = new CoverCache(_paths.CoverCacheDir, _f95);
         _worker = new RenPyWorker(_registry, _f95, _settings, _covers, host);
