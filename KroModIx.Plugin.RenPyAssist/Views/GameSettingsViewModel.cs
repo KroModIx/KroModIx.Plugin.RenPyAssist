@@ -208,7 +208,12 @@ public sealed partial class GameSettingsViewModel : ObservableObject, IDisposabl
                 // Sidebar-Kachel-Badge muss sofort verschwinden — ohne
                 // Trigger würde die 60s-Periodik greifen.
                 try { await _host.RequestUpdateBadgeRefreshAsync(); }
-                catch { }
+                catch (Exception ex)
+                {
+                    // Badge bleibt dann bis zur 60s-Periodik stehen — das
+                    // will man im Log sehen, wenn der User sich wundert.
+                    _host.Logger.Debug(ex, "Badge-Refresh nach Update fehlgeschlagen");
+                }
             }
             else
             {

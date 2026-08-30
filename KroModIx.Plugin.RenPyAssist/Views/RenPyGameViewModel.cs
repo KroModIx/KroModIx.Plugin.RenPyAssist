@@ -149,7 +149,12 @@ public sealed partial class RenPyGameViewModel : ObservableObject, IDisposable
             var sidebarOverride = GameLocalStore.SidebarCoverPath(_containerPath);
             var effectiveSidebarPath = File.Exists(sidebarOverride) ? sidebarOverride : path;
             try { _host.TrySetManualGameCover(_containerPath, effectiveSidebarPath); }
-            catch { }
+            catch (Exception ex)
+            {
+                // Kein App-Fehler, aber der User sieht danach eine Kachel mit
+                // altem/fehlendem Cover und hatte bisher keinerlei Spur davon.
+                _host.Logger.Debug(ex, "Sidebar-Cover setzen fehlgeschlagen: {Path}", effectiveSidebarPath);
+            }
         }
         // Detail-View zeigt immer das volle Cover (nicht den Sidebar-Ausschnitt)
         TrySetCoverFromFile(path);

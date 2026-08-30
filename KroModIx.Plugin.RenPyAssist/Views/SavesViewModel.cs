@@ -194,7 +194,11 @@ public sealed partial class SavesViewModel : ObservableObject
             if (bmp is null) return;
             await Dispatcher.UIThread.InvokeAsync(() => Screenshot = bmp);
         }
-        catch { }
+        catch (Exception ex)
+        {
+            // Ohne Log war ein leerer Screenshot-Bereich nicht diagnostizierbar.
+            _host.Logger.Debug(ex, "Screenshot-Decode fehlgeschlagen");
+        }
     }
 
     private static string FormatMetadata(SaveInfo info)
