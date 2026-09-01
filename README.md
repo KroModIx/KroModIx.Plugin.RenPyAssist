@@ -7,12 +7,30 @@
 mit direkter [f95zone.to](https://f95zone.to/)-Anbindung. Plugin für den
 [KroModIx](https://github.com/KroModIx/KroModIx).
 
-## Neu in v0.14.0
-- **DE+EN-Übersetzung** aller User-facing Strings (218 Keys) — Tab-Labels,
-  Buttons, Placeholders, Tooltips, Statusmeldungen, Notifications, Dialoge,
-  Detail-Sektionen (Archive-Browser, Save-Editor, Mods-Pipeline, Settings,
-  Cover-Crop, Translate-Setup, Rename-Config). Sprachwechsel im Host schaltet
-  nach Kachel-Reselect live um.
+## Voraussetzungen
+
+Braucht den [KroModIx-Host](https://github.com/KroModIx/KroModIx) **ab
+v1.27.0** — dort sitzen der gemeinsame Versions-Vergleich und der
+proxy-fähige HTTP-Handler für den f95zone-Login, gegen die dieses Plugin
+gebaut ist. Ältere Hosts laden das Plugin nicht.
+
+## Screenshot
+
+![Übersicht eines Ren'Py-Spiels mit Cover, Version und f95zone-Thread-Button](docs/screenshot.png)
+
+## Neu in v0.19.0
+
+- **Spielstände sind beim Update abgesichert** — der alte Versions-Ordner
+  wird erst gelöscht, wenn die Kopie der Saves gegengezählt wurde. Details
+  unter [Schutz für deine Spielstände](#schutz-für-deine-spielstände).
+- **Save-Editor legt eine `.bak` an**, bevor er Pickle-Bytes patcht.
+- **🔗 Thread öffnen** — ein Klick von der Übersicht (und aus den
+  Einstellungen) in den verknüpften f95zone-Thread.
+- **Update-Badge nur bei echt neuerer Thread-Version.** Vorher zählte jede
+  Abweichung als Update, auch wenn lokal die neuere Version lag
+  (`0.5` lokal gegen `0.4.5` im Thread).
+- **DE+EN** für alle User-facing Strings; Sprachwechsel im Host schaltet nach
+  Kachel-Reselect live um.
 
 ## Ziel
 
@@ -194,6 +212,22 @@ Player läuft weiter.
   Kern-Logik in die KroModIx-Plugin-Architektur.
 - **F95zone** — [f95zone.to](https://f95zone.to/) (Forum + Attachment-
   Hosting).
+
+## Schutz für deine Spielstände
+
+Ren'Py-Container sind zu groß für ZIP-Snapshots vor jeder Aktion — deshalb
+schützt das Plugin gezielt das, was unersetzlich ist:
+
+- **Beim Update** werden `game/saves/` in die neue Version kopiert und die
+  Kopie danach gegengezählt (Dateianzahl und Größe). Erst wenn das passt,
+  wird der alte Versions-Ordner gelöscht. Klappt die Übernahme nicht, bleibt
+  der alte Ordner stehen und du bekommst einen Dialog, der dir sagt, wo deine
+  Spielstände liegen.
+- **Im Save-Editor** entsteht vor dem ersten Schreiben eine `.bak`-Kopie
+  neben dem Save. Ein bereits vorhandenes Backup bleibt unangetastet — es ist
+  der letzte unveränderte Stand. Lässt sich das Backup nicht anlegen, wird
+  gar nicht erst geschrieben.
+
 
 ## Lizenz
 
