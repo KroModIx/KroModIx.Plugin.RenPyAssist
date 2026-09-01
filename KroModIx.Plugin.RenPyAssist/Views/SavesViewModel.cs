@@ -240,7 +240,15 @@ public sealed partial class SavesViewModel : ObservableObject
         try
         {
             IsBusy = true;
+            // v0.19.0: Backup VOR dem Schreiben. Der Write ist zwar atomar
+            // (tmp + Move), inhaltlich aber riskant: gepatcht werden rohe
+            // Pickle-Bytes per Splice. Wenn Ren'Py das Ergebnis nicht mehr
+            // laden kann, gab es vorher kein Original mehr — Quelle und Ziel
+            // sind derselbe Pfad.
+            var backup = TryBackupSave(SelectedSave.FullPath);
             await Task.Run(() => _saveService.Write(SelectedSave.FullPath, SelectedSave.FullPath, edits));
+            if (backup is not null)
+                _host.Logger.Info("Save-Backup liegt unter {Path}", backup);
             _host.Notifications.Notify(
                 string.Format(Strings.T("notify.saves_changes_saved"), edits.Count),
                 NotificationLevel.Success);
@@ -252,6 +260,27 @@ public sealed partial class SavesViewModel : ObservableObject
             await _host.Dialogs.ShowMessageAsync(Strings.T("dialog.save_error_title"), ex.Message);
         }
         finally { IsBusy = false; }
+    }
+
+    /// <summary>Legt eine <c>.bak</c>-Kopie des Saves neben das Original.
+    /// Bestehende Backups werden nicht ueberschrieben — das erste Backup ist
+    /// der letzte unveraenderte Stand und genau der, den man zurueckwill.
+    /// Schlaegt das Backup fehl, bricht der Edit ab: lieber nicht editieren
+    /// als ohne Netz editieren.</summary>
+    private string? TryBackupSave(string savePath)
+    {
+        var target = savePath + ".bak";
+        try
+        {
+            if (File.Exists(target)) return target;
+            File.Copy(savePath, target);
+            return target;
+        }
+        catch (Exception ex)
+        {
+            _host.Logger.Warn(ex, "Save-Backup fehlgeschlagen: {Path}", savePath);
+            throw new IOException(string.Format(Strings.T("saves.backup_failed"), target), ex);
+        }
     }
 
     [RelayCommand]

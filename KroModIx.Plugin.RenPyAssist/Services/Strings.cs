@@ -176,6 +176,12 @@ public static class Strings
         ["status.login_not_logged_in"] = "✘ Nicht eingeloggt",
         ["status.container_prefix"] = "Container: {0}",
         ["status.last_checked_prefix"] = "zuletzt geprüft: {0}",
+        ["saves.backup_failed"] =
+            "Backup des Saves konnte nicht angelegt werden ({0}) — Aenderung abgebrochen, "
+            + "damit kein Save ohne Sicherung gepatcht wird.",
+        ["saves.backup_failed"] =
+            "Could not create a backup of the save ({0}) — change aborted so that no save "
+            + "gets patched without a safety net.",
         ["dialog.saves_warning_title"] = "Spielstaende nicht uebernommen",
         ["install.saves_not_copied"] =
             "Achtung: die Spielstaende konnten nicht in die neue Version uebernommen werden. "
