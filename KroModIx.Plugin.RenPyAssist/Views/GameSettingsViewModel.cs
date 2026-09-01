@@ -204,6 +204,15 @@ public sealed partial class GameSettingsViewModel : ObservableObject, IDisposabl
                     string.Format(Strings.T("notify.update_installed"), _game.DisplayName, result.NewSubPath),
                     NotificationLevel.Success);
                 GameStatus = Strings.T("status.update_done");
+                // v0.19.0: Saves konnten nicht uebernommen werden → der alte
+                // Ordner steht noch. Das MUSS als Dialog kommen, nicht nur als
+                // Toast: sonst startet der User die neue Version und wundert
+                // sich, warum seine Spielstaende fehlen.
+                if (result.Warning is string warning)
+                {
+                    await _host.Dialogs.ShowMessageAsync(Strings.T("dialog.saves_warning_title"), warning);
+                    GameStatus = warning;
+                }
                 RefreshFromRegistry();
                 // Sidebar-Kachel-Badge muss sofort verschwinden — ohne
                 // Trigger würde die 60s-Periodik greifen.

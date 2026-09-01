@@ -176,6 +176,16 @@ public static class Strings
         ["status.login_not_logged_in"] = "✘ Nicht eingeloggt",
         ["status.container_prefix"] = "Container: {0}",
         ["status.last_checked_prefix"] = "zuletzt geprüft: {0}",
+        ["dialog.saves_warning_title"] = "Spielstaende nicht uebernommen",
+        ["install.saves_not_copied"] =
+            "Achtung: die Spielstaende konnten nicht in die neue Version uebernommen werden. "
+            + "Der alte Ordner '{0}' wurde deshalb NICHT geloescht — deine Saves liegen dort noch "
+            + "unter game/saves/. Bitte manuell kopieren, bevor du den Ordner entfernst.",
+        ["dialog.saves_warning_title"] = "Save games not transferred",
+        ["install.saves_not_copied"] =
+            "Warning: the save games could not be transferred to the new version. "
+            + "The old folder '{0}' was therefore NOT deleted — your saves are still in there "
+            + "under game/saves/. Please copy them manually before removing the folder.",
         ["status.no_thread_hint"] =
             "Kein f95zone-Thread verknüpft. In den Einstellungen (⚙) rechts oben " +
             "kannst du den Thread-Link eintragen — dann erscheinen Cover, " +

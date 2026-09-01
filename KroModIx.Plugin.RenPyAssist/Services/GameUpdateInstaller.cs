@@ -98,17 +98,30 @@ public sealed class GameUpdateInstaller
             var newSubName = Path.GetFileName(newSubDir);
 
             // 4. Save-Games kopieren.
+            //
+            // v0.19.0: Das Ergebnis entscheidet, ob der alte Sub-Ordner in
+            // Schritt 6 geloescht werden darf. Vorher wurde ein
+            // fehlgeschlagener Copy nur geloggt und trotzdem weiter geloescht
+            // — bei voller Platte, gesperrter Datei oder Rechte-Problem waren
+            // die Spielstaende danach unwiederbringlich weg.
+            bool savesSecured = !hadSaves;
+            string? savesWarning = null;
             if (hadSaves)
             {
                 var newSavesDir = Path.Combine(newSubDir, "game", "saves");
                 try
                 {
                     CopyDirectoryRecursive(oldSavesDir, newSavesDir);
-                    Log.Info("Saves kopiert: {From} → {To}", oldSavesDir, newSavesDir);
+                    savesSecured = VerifySavesCopied(oldSavesDir, newSavesDir);
+                    if (savesSecured)
+                        Log.Info("Saves kopiert: {From} → {To}", oldSavesDir, newSavesDir);
+                    else
+                        Log.Error("Save-Copy unvollstaendig: {From} → {To} — alter Ordner bleibt stehen",
+                            oldSavesDir, newSavesDir);
                 }
                 catch (Exception ex)
                 {
-                    Log.Warn(ex, "Save-Copy fehlgeschlagen — neue Installation ohne Saves");
+                    Log.Error(ex, "Save-Copy fehlgeschlagen — alter Ordner bleibt stehen: {From}", oldSavesDir);
                 }
             }
 
@@ -136,7 +149,8 @@ public sealed class GameUpdateInstaller
             //    mehr). Nur wenn wirklich ein alter Sub-Path existierte UND
             //    er nicht identisch zum neuen ist (defensive check).
             if (!string.IsNullOrEmpty(oldSubPath)
-                && !string.Equals(oldSubPath, newSubName, StringComparison.Ordinal))
+                && !string.Equals(oldSubPath, newSubName, StringComparison.Ordinal)
+                && savesSecured)
             {
                 var oldFullDir = Path.Combine(game.ContainerPath, oldSubPath);
                 if (Directory.Exists(oldFullDir))
@@ -153,6 +167,16 @@ public sealed class GameUpdateInstaller
                 }
             }
 
+            else if (!savesSecured)
+            {
+                // Kein stiller Datenverlust: der User muss wissen, dass der
+                // alte Ordner absichtlich stehen bleibt und seine Saves dort
+                // noch liegen.
+                Log.Warn("Alter Sub-Ordner {Old} wurde NICHT geloescht — Saves konnten nicht "
+                         + "uebernommen werden", oldSubPath);
+                savesWarning = string.Format(Strings.T("install.saves_not_copied"), oldSubPath);
+            }
+
             // 7. Registry aktualisieren — LocalVersion aus neuem Sub-Ordner-Namen.
             //    LastRemoteVersion auf LocalVersion setzen: der User hat gerade
             //    das aktuelle Remote-Update installiert, ergo HasUpdate=false.
@@ -165,12 +189,35 @@ public sealed class GameUpdateInstaller
                 game.LastRemoteVersion = game.LocalVersion;
             _registry.Update(game);
 
-            return InstallResult.Ok(newSubName, oldSubPath);
+            return InstallResult.Ok(newSubName, oldSubPath, savesWarning);
         }
         catch (Exception ex)
         {
             Log.Error(ex, "Update-Install fehlgeschlagen für {Container}", game.ContainerPath);
             return InstallResult.Fail(ex.Message);
+        }
+    }
+
+    /// <summary>Zaehlt Dateien und Gesamtgroesse in Quelle und Ziel gegen.
+    /// Ein Copy, der die Haelfte geschafft hat und dann abgebrochen ist,
+    /// zaehlt als NICHT gesichert — sonst faellt der Loesch-Schritt darauf
+    /// rein.</summary>
+    private static bool VerifySavesCopied(string source, string destination)
+    {
+        try
+        {
+            if (!Directory.Exists(destination)) return false;
+            var srcFiles = Directory.GetFiles(source, "*", SearchOption.AllDirectories);
+            var dstFiles = Directory.GetFiles(destination, "*", SearchOption.AllDirectories);
+            if (dstFiles.Length < srcFiles.Length) return false;
+            long srcBytes = srcFiles.Sum(f => new FileInfo(f).Length);
+            long dstBytes = dstFiles.Sum(f => new FileInfo(f).Length);
+            return dstBytes >= srcBytes;
+        }
+        catch (Exception ex)
+        {
+            Log.Warn(ex, "Save-Verifikation fehlgeschlagen — als unsicher behandelt");
+            return false;
         }
     }
 
@@ -191,8 +238,15 @@ public sealed class GameUpdateInstaller
 
 public sealed record InstallResult(bool Success, string? NewSubPath, string? OldSubPath, string? Error)
 {
-    public static InstallResult Ok(string newSubPath, string? oldSubPath)
-        => new(true, newSubPath, oldSubPath, null);
+    /// <summary>v0.19.0: gesetzt, wenn der Install zwar durchlief, die Saves
+    /// aber nicht uebernommen werden konnten und der alte Sub-Ordner deshalb
+    /// absichtlich stehen geblieben ist. Der Aufrufer MUSS das anzeigen —
+    /// sonst wundert sich der User ueber den doppelten Ordner und startet
+    /// womoeglich die neue Version ohne seine Spielstaende.</summary>
+    public string? Warning { get; init; }
+
+    public static InstallResult Ok(string newSubPath, string? oldSubPath, string? warning = null)
+        => new(true, newSubPath, oldSubPath, null) { Warning = warning };
     public static InstallResult Fail(string error)
         => new(false, null, null, error);
 }
