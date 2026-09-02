@@ -18,6 +18,16 @@ gebaut ist. Ältere Hosts laden das Plugin nicht.
 
 ![Übersicht eines Ren'Py-Spiels mit Cover, Version und f95zone-Thread-Button](docs/screenshot.png)
 
+## Neu in v0.20.0
+
+- **Der gelbe Update-Badge ist klickbar.** Ein Klick sucht im
+  Downloads-Ordner nach der passenden Update-ZIP, zeigt dir Dateiname und
+  erkannte Version zur Bestätigung und installiert sie. Findet er nichts —
+  oder passt der Vorschlag nicht — öffnet sich die Datei-Auswahl. Der Weg
+  über den Einstellungen-Tab entfällt damit für den Normalfall.
+- Der Button im Einstellungen-Tab nutzt denselben Ablauf, sucht also
+  ebenfalls erst im Downloads-Ordner.
+
 ## Neu in v0.19.0
 
 - **Spielstände sind beim Update abgesichert** — der alte Versions-Ordner
@@ -127,6 +137,24 @@ Spiel-spezifisch: Thread-URL, ▶ Start, ⬆ Update installieren, 🔄 Prüfen,
 Plugin-global: Downloads-Watch-Ordner, Check-Intervall, **f95zone-Login**
 (User/Passwort → Session-Cookies verschlüsselt via Host-`ISecretProtection`
 / DPAPI / libsecret abgelegt; Passwort landet nie auf der Platte).
+
+## Update installieren
+
+Wenn der f95zone-Thread eine neuere Version meldet, erscheint in der
+Übersicht der goldene Badge `↑ <Version>`. Ein Klick darauf:
+
+1. durchsucht deinen Downloads-Ordner (der aus den Plugin-Einstellungen) nach
+   einer passenden `.zip`,
+2. bewertet die Treffer nach Namensähnlichkeit und erkannter Version — die
+   Version aus dem Thread zählt am stärksten, bereits installierte oder
+   ältere Versionen fliegen raus,
+3. zeigt den besten Treffer mit Dateiname und Version zur Bestätigung,
+4. entpackt ihn in den Container, überträgt die Spielstände und setzt den
+   aktiven Sub-Path auf die neue Version.
+
+Ohne Treffer (oder wenn du den Vorschlag ablehnst) öffnet sich die
+Datei-Auswahl. Nur `.zip` wird vorgeschlagen — RAR und 7z kann der Installer
+derzeit nicht entpacken, ein Vorschlag würde beim Entpacken scheitern.
 
 ## Sub-Path-Rotation
 

@@ -22,7 +22,7 @@ public sealed partial class GameSettingsViewModel : ObservableObject, IDisposabl
     private readonly F95zoneClient _f95;
     private readonly F95zoneSessionStore _sessionStore;
     private readonly RenPyWorker _worker;
-    private readonly GameUpdateInstaller _installer;
+    private readonly GameUpdateFlow _updateFlow;
     private readonly IHostServices _host;
     // Nach RenameFolder mutable — der Detail-View wird beim Kachel-Klick
     // ohnehin neu gebaut (via ManualGameRenamed-Event im Host), aber solange
@@ -57,7 +57,7 @@ public sealed partial class GameSettingsViewModel : ObservableObject, IDisposabl
 
     public GameSettingsViewModel(RenPyGame game, GamesRegistry registry,
         RenPySettingsService settings, F95zoneClient f95, F95zoneSessionStore sessionStore,
-        RenPyWorker worker, GameUpdateInstaller installer, IHostServices host)
+        RenPyWorker worker, GameUpdateFlow updateFlow, IHostServices host)
     {
         _game = game;
         _registry = registry;
@@ -65,7 +65,7 @@ public sealed partial class GameSettingsViewModel : ObservableObject, IDisposabl
         _f95 = f95;
         _sessionStore = sessionStore;
         _worker = worker;
-        _installer = installer;
+        _updateFlow = updateFlow;
         _host = host;
         _containerPath = game.ContainerPath;
         _threadUrlDraft = game.ThreadUrl ?? "";
@@ -183,62 +183,27 @@ public sealed partial class GameSettingsViewModel : ObservableObject, IDisposabl
         finally { IsBusy = false; }
     }
 
+    /// <summary>Gleicher Ablauf wie beim Update-Badge in der Uebersicht:
+    /// erst im Downloads-Ordner suchen, sonst Datei-Auswahl (v0.20.0). Die
+    /// Kette selbst liegt in <see cref="GameUpdateFlow"/>, damit sie nicht an
+    /// zwei Stellen gepflegt werden muss.</summary>
     [RelayCommand]
     private async Task InstallUpdateAsync()
     {
-        var zip = await _host.Dialogs.PickFileAsync(
-            string.Format(Strings.T("dialog.pick_update_zip"), _game.DisplayName),
-            (Strings.T("dialog.zip_filter"), new[] { "*.zip" }));
-        if (zip is null) return;
-        var ok = await _host.Dialogs.ConfirmAsync(Strings.T("dialog.install_update_title"),
-            string.Format(Strings.T("dialog.install_update_msg"), _game.ContainerPath));
-        if (!ok) return;
         try
         {
             IsBusy = true;
-            GameStatus = Strings.T("status.unpacking");
-            var result = await _installer.InstallAsync(_game, zip);
-            if (result.Success)
-            {
-                _host.Notifications.Notify(
-                    string.Format(Strings.T("notify.update_installed"), _game.DisplayName, result.NewSubPath),
-                    NotificationLevel.Success);
-                GameStatus = Strings.T("status.update_done");
-                // v0.19.0: Saves konnten nicht uebernommen werden → der alte
-                // Ordner steht noch. Das MUSS als Dialog kommen, nicht nur als
-                // Toast: sonst startet der User die neue Version und wundert
-                // sich, warum seine Spielstaende fehlen.
-                if (result.Warning is string warning)
-                {
-                    await _host.Dialogs.ShowMessageAsync(Strings.T("dialog.saves_warning_title"), warning);
-                    GameStatus = warning;
-                }
-                RefreshFromRegistry();
-                // Sidebar-Kachel-Badge muss sofort verschwinden — ohne
-                // Trigger würde die 60s-Periodik greifen.
-                try { await _host.RequestUpdateBadgeRefreshAsync(); }
-                catch (Exception ex)
-                {
-                    // Badge bleibt dann bis zur 60s-Periodik stehen — das
-                    // will man im Log sehen, wenn der User sich wundert.
-                    _host.Logger.Debug(ex, "Badge-Refresh nach Update fehlgeschlagen");
-                }
-            }
-            else
-            {
-                await _host.Dialogs.ShowMessageAsync(Strings.T("dialog.install_fail_title"),
-                    result.Error ?? Strings.T("dialog.install_fail_unknown"));
-                GameStatus = string.Format(Strings.T("status.status_error_prefix"), result.Error);
-            }
+            await _updateFlow.InstallUpdateAsync(_game, msg => GameStatus = msg);
+            RefreshFromRegistry();
+        }
+        catch (Exception ex)
+        {
+            _host.Logger.Warn(ex, "Update-Install fehlgeschlagen: {Game}", _game.DisplayName);
+            await _host.Dialogs.ShowMessageAsync(Strings.T("dialog.install_fail_title"), ex.Message);
         }
         finally { IsBusy = false; }
     }
 
-    /// <summary>Öffnet den <see cref="CoverCropDialog"/> mit dem aktuellen
-    /// Cover als Vorlage. Nach Bestätigung schreibt der Dialog den Ausschnitt
-    /// als PNG in <c>.renpyassist/sidebar-cover.png</c> und wir triggern
-    /// <c>TrySetManualGameCover</c> damit die Sidebar-Kachel den Ausschnitt
-    /// nutzt.</summary>
     [RelayCommand]
     private async Task ChooseSidebarCropAsync()
     {

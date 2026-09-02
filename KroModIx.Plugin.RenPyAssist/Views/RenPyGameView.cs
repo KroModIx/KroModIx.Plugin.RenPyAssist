@@ -31,23 +31,53 @@ public sealed class RenPyGameView : UserControl
         };
         title.Bind(TextBlock.TextProperty, new Binding(nameof(RenPyGameViewModel.DisplayName)));
 
-        // Update-Badge kleiner unter dem Titel
-        var updateBadge = new Border
-        {
-            CornerRadius = new CornerRadius(14),
-            Padding = new Thickness(14, 4),
-            HorizontalAlignment = HorizontalAlignment.Center,
-            Margin = new Thickness(0, 0, 0, 12),
-            [!Border.BackgroundProperty] = new DynamicResourceExtension("KrosteGoldBrush"),
-        };
+        // Update-Badge kleiner unter dem Titel.
+        //
+        // v0.20.0: Der Badge ist ein Button. Ein Klick sucht im Downloads-
+        // Ordner nach der passenden Update-Datei und installiert sie; ohne
+        // Treffer oeffnet sich die Datei-Auswahl. Optisch bleibt es der
+        // goldene Badge — deshalb ein Button mit eigenem Template statt einer
+        // Style-Klasse, sonst kaeme der Default-Button-Look durch.
         var updateBadgeText = new TextBlock
         {
             FontSize = 13, FontWeight = FontWeight.SemiBold,
             Foreground = Brushes.Black,
+            VerticalAlignment = VerticalAlignment.Center,
         };
         updateBadgeText.Bind(TextBlock.TextProperty, new Binding(nameof(RenPyGameViewModel.UpdateBadgeText)));
-        updateBadge.Child = updateBadgeText;
-        updateBadge.Bind(Border.IsVisibleProperty, new Binding(nameof(RenPyGameViewModel.HasUpdate)));
+
+        var updateBadge = new Button
+        {
+            Padding = new Thickness(14, 4),
+            CornerRadius = new CornerRadius(14),
+            HorizontalAlignment = HorizontalAlignment.Center,
+            Margin = new Thickness(0, 0, 0, 12),
+            Cursor = new Avalonia.Input.Cursor(Avalonia.Input.StandardCursorType.Hand),
+            BorderThickness = new Thickness(0),
+            Content = updateBadgeText,
+            [!Button.BackgroundProperty] = new DynamicResourceExtension("KrosteGoldBrush"),
+        };
+        updateBadge.Bind(Button.CommandProperty, new Binding(nameof(RenPyGameViewModel.InstallUpdateCommand)));
+        updateBadge.Bind(Button.IsVisibleProperty, new Binding(nameof(RenPyGameViewModel.HasUpdate)));
+        updateBadge.Bind(Button.IsEnabledProperty, new Binding(nameof(RenPyGameViewModel.IsInstallingUpdate))
+        { Converter = new Avalonia.Data.Converters.FuncValueConverter<bool, bool>(v => !v) });
+        ToolTip.SetTip(updateBadge, Strings.T("tooltip.update_badge"));
+
+        // Zwischenstand des Installs (entpacken, Datei-Auswahl, Fehler)
+        var updateStatus = new TextBlock
+        {
+            FontSize = 11,
+            HorizontalAlignment = HorizontalAlignment.Center,
+            TextAlignment = TextAlignment.Center,
+            TextWrapping = TextWrapping.Wrap,
+            MaxWidth = 700,
+            Margin = new Thickness(0, 0, 0, 8),
+        };
+        updateStatus.Classes.Add("muted");
+        updateStatus.Bind(TextBlock.TextProperty, new Binding(nameof(RenPyGameViewModel.UpdateStatus)));
+        updateStatus.Bind(TextBlock.IsVisibleProperty, new Binding(nameof(RenPyGameViewModel.UpdateStatus))
+        { Converter = new Avalonia.Data.Converters.FuncValueConverter<string?, bool>(
+            v => !string.IsNullOrWhiteSpace(v)) });
 
         var versionInfo = new TextBlock
         {
@@ -221,7 +251,7 @@ public sealed class RenPyGameView : UserControl
             Margin = new Thickness(24, 32, 24, 24),
             Children =
             {
-                title, updateBadge, versionInfo, subPath, openThreadBtn,
+                title, updateBadge, updateStatus, versionInfo, subPath, openThreadBtn,
                 coverFallback, coverImage, animatedCover,
                 descHeader, descText, translationHint,
                 genreHeader, genrePanel,

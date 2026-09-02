@@ -182,11 +182,33 @@ public static class Strings
         ["saves.backup_failed"] =
             "Could not create a backup of the save ({0}) — change aborted so that no save "
             + "gets patched without a safety net.",
+        ["dialog.update_found_title"] = "Update-Datei gefunden",
+        ["dialog.update_found_msg"] =
+            "Im Downloads-Ordner liegt:\n\n{0}\n{1}\n\nIn den Container installieren?\n{2}\n\n"
+            + "\u201eNein\u201c \u00f6ffnet stattdessen die Datei-Auswahl.",
+        ["dialog.update_found_ok"] = "Installieren",
+        ["update.version_prefix"] = "Erkannte Version: {0}",
+        ["update.version_unknown"] = "Keine Version im Dateinamen erkannt",
+        ["status.pick_update_file"] = "Datei ausw\u00e4hlen \u2026",
+        ["tooltip.update_badge"] =
+            "Klicken: sucht im Downloads-Ordner nach der passenden Update-Datei "
+            + "und installiert sie. Ohne Treffer \u00f6ffnet sich die Datei-Auswahl.",
         ["dialog.saves_warning_title"] = "Spielstaende nicht uebernommen",
         ["install.saves_not_copied"] =
             "Achtung: die Spielstaende konnten nicht in die neue Version uebernommen werden. "
             + "Der alte Ordner '{0}' wurde deshalb NICHT geloescht — deine Saves liegen dort noch "
             + "unter game/saves/. Bitte manuell kopieren, bevor du den Ordner entfernst.",
+        ["dialog.update_found_title"] = "Update file found",
+        ["dialog.update_found_msg"] =
+            "Found in your downloads folder:\n\n{0}\n{1}\n\nInstall into the container?\n{2}\n\n"
+            + "Choosing \u201cNo\u201d opens the file picker instead.",
+        ["dialog.update_found_ok"] = "Install",
+        ["update.version_prefix"] = "Detected version: {0}",
+        ["update.version_unknown"] = "No version detected in the file name",
+        ["status.pick_update_file"] = "Choose a file \u2026",
+        ["tooltip.update_badge"] =
+            "Click to search your downloads folder for the matching update file "
+            + "and install it. Without a match the file picker opens.",
         ["dialog.saves_warning_title"] = "Save games not transferred",
         ["install.saves_not_copied"] =
             "Warning: the save games could not be transferred to the new version. "

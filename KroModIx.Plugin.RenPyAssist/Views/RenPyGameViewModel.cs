@@ -20,6 +20,7 @@ public sealed partial class RenPyGameViewModel : ObservableObject, IDisposable
     private readonly GamesRegistry _registry;
     private readonly CoverCache _covers;
     private readonly AiTranslator _translator;
+    private readonly GameUpdateFlow _updateFlow;
     private readonly IHostServices _host;
     private readonly string _containerPath;
     private RenPyGame _game;
@@ -37,16 +38,22 @@ public sealed partial class RenPyGameViewModel : ObservableObject, IDisposable
     [ObservableProperty] private string _descriptionText = "";
     [ObservableProperty] private bool _isTranslating;
     [ObservableProperty] private string _translationHint = "";
+    [ObservableProperty] private bool _isInstallingUpdate;
+    /// <summary>Zwischenstand waehrend des Update-Installs (entpacken,
+    /// Datei-Auswahl, Fehler) — direkt unter dem Badge sichtbar.</summary>
+    [ObservableProperty] private string _updateStatus = "";
 
     public ObservableCollection<string> Genres { get; } = new();
 
     public RenPyGameViewModel(RenPyGame game, GamesRegistry registry,
-        CoverCache covers, AiTranslator translator, IHostServices host)
+        CoverCache covers, AiTranslator translator, GameUpdateFlow updateFlow,
+        IHostServices host)
     {
         _game = game;
         _registry = registry;
         _covers = covers;
         _translator = translator;
+        _updateFlow = updateFlow;
         _host = host;
         _containerPath = game.ContainerPath;
 
@@ -88,6 +95,33 @@ public sealed partial class RenPyGameViewModel : ObservableObject, IDisposable
     /// (Copy-Paste der URL) oder den Update-Doppelklick auf der Sidebar-
     /// Kachel erreichbar — beides zu umständlich für den Normalfall
     /// „schnell im Thread nachlesen".</summary>
+    /// <summary>v0.20.0: der Update-Badge ist klickbar. Ein Klick sucht im
+    /// Downloads-Ordner nach der passenden Update-Datei und installiert sie —
+    /// ohne Treffer oeffnet sich die Datei-Auswahl. Vorher fuehrte der Weg
+    /// zwingend ueber den Einstellungen-Tab und den Datei-Dialog, obwohl die
+    /// frisch heruntergeladene ZIP fast immer im Downloads-Ordner liegt.</summary>
+    [RelayCommand]
+    private async Task InstallUpdateAsync()
+    {
+        if (IsInstallingUpdate) return;
+        try
+        {
+            IsInstallingUpdate = true;
+            await _updateFlow.InstallUpdateAsync(_game, msg => UpdateStatus = msg);
+            RefreshFromRegistry();
+        }
+        catch (Exception ex)
+        {
+            _host.Logger.Warn(ex, "Update-Install fehlgeschlagen: {Game}", _game.DisplayName);
+            await _host.Dialogs.ShowMessageAsync(Strings.T("dialog.install_fail_title"), ex.Message);
+        }
+        finally
+        {
+            IsInstallingUpdate = false;
+            UpdateStatus = "";
+        }
+    }
+
     [RelayCommand]
     private void OpenThread()
     {

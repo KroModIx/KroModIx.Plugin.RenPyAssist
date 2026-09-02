@@ -69,6 +69,7 @@ public sealed class RenPyAssistPlugin : IGameModPlugin, IUpdateNotifier, IGameLa
     private RenPyWorker? _worker;
     private DownloadWatcher? _downloadWatcher;
     private GameUpdateInstaller? _installer;
+    private GameUpdateFlow? _updateFlow;
     // v0.4: RPA-Extract + Save-Editor + Media-Preview
     private RenpyArchiveService? _rpaService;
     private RenpySaveService? _saveService;
@@ -93,6 +94,7 @@ public sealed class RenPyAssistPlugin : IGameModPlugin, IUpdateNotifier, IGameLa
         _worker = new RenPyWorker(_registry, _f95, _settings, _covers, host);
         _downloadWatcher = new DownloadWatcher();
         _installer = new GameUpdateInstaller(_registry);
+        _updateFlow = new GameUpdateFlow(_installer, _registry, _settings, host);
         _rpaService = new RenpyArchiveService();
         _saveService = new RenpySaveService();
         _previewService = new MediaPreviewService();
@@ -212,17 +214,17 @@ public sealed class RenPyAssistPlugin : IGameModPlugin, IUpdateNotifier, IGameLa
     {
         if (_host is null || _settings is null || _registry is null
             || _f95 is null || _sessionStore is null || _covers is null
-            || _worker is null || _installer is null
+            || _worker is null || _installer is null || _updateFlow is null
             || _rpaService is null || _saveService is null || _previewService is null
             || _translator is null || _modBuilder is null || _rpycBatch is null)
             yield break;
 
-        yield return new GameDetailTab(_registry, _covers, _translator, _host);
+        yield return new GameDetailTab(_registry, _covers, _translator, _updateFlow, _host);
         yield return new ArchivesTab(_rpaService, _previewService, _registry, _host);
         yield return new SavesTab(_saveService, _registry, _host);
         yield return new ModsTab(_modBuilder, _rpycBatch, _registry, _host);
         yield return new GameSettingsTab(_registry, _settings, _f95, _sessionStore,
-            _worker, _installer, _host);
+            _worker, _updateFlow, _host);
     }
 
     public async Task ShutdownAsync()
@@ -387,13 +389,14 @@ public sealed class RenPyAssistPlugin : IGameModPlugin, IUpdateNotifier, IGameLa
         private readonly GamesRegistry _registry;
         private readonly CoverCache _covers;
         private readonly AiTranslator _translator;
+        private readonly GameUpdateFlow _updateFlow;
         private readonly IHostServices _host;
 
         public GameDetailTab(GamesRegistry registry, CoverCache covers,
-            AiTranslator translator, IHostServices host)
+            AiTranslator translator, GameUpdateFlow updateFlow, IHostServices host)
         {
             _registry = registry; _covers = covers;
-            _translator = translator; _host = host;
+            _translator = translator; _updateFlow = updateFlow; _host = host;
         }
 
         public string Id => "game";
@@ -407,7 +410,7 @@ public sealed class RenPyAssistPlugin : IGameModPlugin, IUpdateNotifier, IGameLa
             var entry = _registry.EnsureFromContainer(game.InstallDir);
             return new RenPyGameView
             {
-                DataContext = new RenPyGameViewModel(entry, _registry, _covers, _translator, _host),
+                DataContext = new RenPyGameViewModel(entry, _registry, _covers, _translator, _updateFlow, _host),
             };
         }
     }
@@ -503,15 +506,15 @@ public sealed class RenPyAssistPlugin : IGameModPlugin, IUpdateNotifier, IGameLa
         private readonly F95zoneClient _f95;
         private readonly F95zoneSessionStore _sessionStore;
         private readonly RenPyWorker _worker;
-        private readonly GameUpdateInstaller _installer;
+        private readonly GameUpdateFlow _updateFlow;
         private readonly IHostServices _host;
 
         public GameSettingsTab(GamesRegistry registry, RenPySettingsService settings,
             F95zoneClient f95, F95zoneSessionStore sessionStore,
-            RenPyWorker worker, GameUpdateInstaller installer, IHostServices host)
+            RenPyWorker worker, GameUpdateFlow updateFlow, IHostServices host)
         {
             _registry = registry; _settings = settings; _f95 = f95;
-            _sessionStore = sessionStore; _worker = worker; _installer = installer;
+            _sessionStore = sessionStore; _worker = worker; _updateFlow = updateFlow;
             _host = host;
         }
 
@@ -527,7 +530,7 @@ public sealed class RenPyAssistPlugin : IGameModPlugin, IUpdateNotifier, IGameLa
             return new GameSettingsView
             {
                 DataContext = new GameSettingsViewModel(entry, _registry, _settings, _f95,
-                    _sessionStore, _worker, _installer, _host),
+                    _sessionStore, _worker, _updateFlow, _host),
             };
         }
     }
