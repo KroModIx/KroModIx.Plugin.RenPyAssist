@@ -71,12 +71,36 @@ public sealed class UpdateArchiveFinderTests : IDisposable
     }
 
     [Fact]
-    public void Nur_ZIP_denn_der_Installer_kann_nur_ZIP()
+    public void RAR_und_7z_zaehlen_seit_v0_21_mit()
     {
+        // Der Installer entpackt seit v0.21.0 ueber SharpCompress, also darf
+        // die Suche sie auch vorschlagen. Vorher waeren das Treffer gewesen,
+        // die erst nach der Bestaetigung beim Entpacken scheitern.
         Touch("HeavenlyVows-0.9.0-pc.rar");
         Touch("HeavenlyVows-0.9.0-pc.7z");
         var hits = UpdateArchiveFinder.Find(_dir, "Heavenly Vows", "0.8.0", "0.9.0");
+        Assert.Equal(2, hits.Count);
+    }
+
+    [Fact]
+    public void Fremde_Formate_bleiben_draussen()
+    {
+        // Was der Installer nicht oeffnen kann, darf auch nicht vorgeschlagen
+        // werden — sonst bestaetigt der User einen Treffer, der scheitert.
+        Touch("HeavenlyVows-0.9.0-pc.exe");
+        Touch("HeavenlyVows-0.9.0-pc.tar.gz");
+        Touch("HeavenlyVows-0.9.0-pc.apk");
+        var hits = UpdateArchiveFinder.Find(_dir, "Heavenly Vows", "0.8.0", "0.9.0");
         Assert.Empty(hits);
+    }
+
+    [Fact]
+    public void Suche_und_Installer_kennen_dieselben_Formate()
+    {
+        // Regressions-Netz: waechst die eine Liste, muss die andere mit.
+        Assert.Equal(
+            new[] { ".7z", ".rar", ".zip" },
+            UpdateArchiveFinder.SupportedExtensions.OrderBy(e => e, StringComparer.Ordinal).ToArray());
     }
 
     [Fact]

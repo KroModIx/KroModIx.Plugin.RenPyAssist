@@ -57,10 +57,15 @@ jobs:
           # - SixLabors.ImageSharp für AVIF/WebP-Cover-Convert
           # - Razorvine.Pickle für RPA-Archive-Index + Save-Files (v0.4+)
           # - Avalonia.Labs.Gif für animierte GIF-Cover in Detail-View (v0.11+)
+          # - SharpCompress für RAR/7z-Update-Archive (v0.21+)
           # Alles andere (Avalonia, Contracts, CommunityToolkit) kommt vom Host.
           cp KroModIx.Plugin.RenPyAssist/bin/Release/net10.0/SixLabors.ImageSharp.dll bundle/ || true
           cp KroModIx.Plugin.RenPyAssist/bin/Release/net10.0/Razorvine.Pickle.dll bundle/ || true
           cp KroModIx.Plugin.RenPyAssist/bin/Release/net10.0/Avalonia.Labs.Gif.dll bundle/ || true
+          # - SharpCompress fuer RAR/7z-Updates (v0.21.0+). Fehlt sie im
+          #   Bundle, stirbt der erste Update-Install mit
+          #   "Could not load file or assembly 'SharpCompress'".
+          cp KroModIx.Plugin.RenPyAssist/bin/Release/net10.0/SharpCompress.dll bundle/ || true
           # Version im Bundle-Manifest auf die Tag-Version setzen (nur wenn Tag-Build).
           if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
             sed -i -E 's/("version"\s*:\s*)"[^"]+"/\1"'"${{ steps.ver.outputs.v }}"'"/' bundle/plugin.json

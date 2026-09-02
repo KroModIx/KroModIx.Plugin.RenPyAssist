@@ -15,12 +15,13 @@ namespace KroModIx.Plugin.RenPyAssist.Services;
 /// Datei fast immer frisch heruntergeladen dort liegt und ihr Name das Spiel
 /// samt Version enthält.</para>
 ///
-/// <para><b>Bewusst nur ZIP:</b> der <see cref="GameUpdateInstaller"/> kann
-/// aktuell nur ZIP entpacken. RAR/7z hier vorzuschlagen würde einen Treffer
-/// anzeigen, der beim Install scheitert.</para></summary>
+/// <para>ZIP, RAR und 7z — dieselben Formate, die der
+/// <see cref="GameUpdateInstaller"/> seit v0.21.0 entpacken kann. Die beiden
+/// Listen muessen zusammenpassen: ein Vorschlag, den der Installer nicht
+/// oeffnen kann, scheitert erst nach der Bestaetigung des Users.</para></summary>
 public static class UpdateArchiveFinder
 {
-    public static readonly string[] SupportedExtensions = [".zip"];
+    public static readonly string[] SupportedExtensions = [".zip", ".rar", ".7z"];
 
     /// <summary>Kandidaten im Ordner, bester zuerst. Leere Liste wenn der
     /// Ordner fehlt oder nichts plausibel passt.</summary>

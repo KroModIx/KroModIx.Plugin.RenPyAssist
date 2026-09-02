@@ -68,9 +68,13 @@ public sealed class GameUpdateFlow
         if (archive is null)
         {
             status?.Invoke(Strings.T("status.pick_update_file"));
-            archive = await _host.Dialogs.PickFileAsync(
+            // v0.21.0: Der Dialog geht im Downloads-Ordner auf (Contracts
+            // v1.28+) — dort liegt die Datei ja, nur eben unter einem Namen,
+            // den die Suche nicht sicher zuordnen konnte.
+            archive = await _host.Dialogs.PickFileInAsync(
                 string.Format(Strings.T("dialog.pick_update_zip"), game.DisplayName),
-                (Strings.T("dialog.zip_filter"), new[] { "*.zip" }));
+                downloadsDir,
+                (Strings.T("dialog.zip_filter"), new[] { "*.zip", "*.rar", "*.7z" }));
             if (archive is null) return false;
 
             var ok = await _host.Dialogs.ConfirmAsync(Strings.T("dialog.install_update_title"),

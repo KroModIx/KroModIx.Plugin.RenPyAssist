@@ -192,7 +192,8 @@ public static class Strings
         ["status.pick_update_file"] = "Datei ausw\u00e4hlen \u2026",
         ["tooltip.update_badge"] =
             "Klicken: sucht im Downloads-Ordner nach der passenden Update-Datei "
-            + "und installiert sie. Ohne Treffer \u00f6ffnet sich die Datei-Auswahl.",
+            + "(ZIP/RAR/7z) und installiert sie. Ohne Treffer \u00f6ffnet sich die "
+            + "Datei-Auswahl \u2014 direkt im Downloads-Ordner.",
         ["dialog.saves_warning_title"] = "Spielstaende nicht uebernommen",
         ["install.saves_not_copied"] =
             "Achtung: die Spielstaende konnten nicht in die neue Version uebernommen werden. "
@@ -208,7 +209,8 @@ public static class Strings
         ["status.pick_update_file"] = "Choose a file \u2026",
         ["tooltip.update_badge"] =
             "Click to search your downloads folder for the matching update file "
-            + "and install it. Without a match the file picker opens.",
+            + "(ZIP/RAR/7z) and install it. Without a match the file picker opens "
+            + "\u2014 right in your downloads folder.",
         ["dialog.saves_warning_title"] = "Save games not transferred",
         ["install.saves_not_copied"] =
             "Warning: the save games could not be transferred to the new version. "
@@ -282,7 +284,7 @@ public static class Strings
         ["dialog.pick_folder_extract"] = "Zielordner für Extraktion",
         ["dialog.pick_folder_extract_all"] = "Zielordner für gesamtes Archiv",
         ["dialog.pick_update_zip"] = "Update-ZIP für „{0}\"",
-        ["dialog.zip_filter"] = "Ren'Py-ZIPs",
+        ["dialog.zip_filter"] = "Ren'Py-Archive (ZIP/RAR/7z)",
         ["dialog.extract_all_title"] = "Alles entpacken?",
         ["dialog.extract_all_msg"] = "{0} Datei(en) werden nach\n{1}\nentpackt. Fortfahren?",
         ["dialog.extract_error_title"] = "Extract-Fehler",
@@ -595,7 +597,7 @@ public static class Strings
         ["dialog.pick_folder_extract"] = "Target folder for extraction",
         ["dialog.pick_folder_extract_all"] = "Target folder for full archive",
         ["dialog.pick_update_zip"] = "Update ZIP for \"{0}\"",
-        ["dialog.zip_filter"] = "Ren'Py ZIPs",
+        ["dialog.zip_filter"] = "Ren'Py archives (ZIP/RAR/7z)",
         ["dialog.extract_all_title"] = "Extract all?",
         ["dialog.extract_all_msg"] = "{0} file(s) will be extracted to\n{1}\nContinue?",
         ["dialog.extract_error_title"] = "Extract error",

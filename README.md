@@ -18,6 +18,13 @@ gebaut ist. Ältere Hosts laden das Plugin nicht.
 
 ![Übersicht eines Ren'Py-Spiels mit Cover, Version und f95zone-Thread-Button](docs/screenshot.png)
 
+## Neu in v0.21.0
+
+- **RAR und 7z** werden beim Update-Install entpackt, nicht mehr nur ZIP —
+  f95zone-Releases kommen in allen dreien.
+- **Die Datei-Auswahl öffnet direkt im Downloads-Ordner**, wenn die
+  automatische Suche nichts Passendes findet.
+
 ## Neu in v0.20.0
 
 - **Der gelbe Update-Badge ist klickbar.** Ein Klick sucht im
@@ -153,8 +160,10 @@ Wenn der f95zone-Thread eine neuere Version meldet, erscheint in der
    aktiven Sub-Path auf die neue Version.
 
 Ohne Treffer (oder wenn du den Vorschlag ablehnst) öffnet sich die
-Datei-Auswahl. Nur `.zip` wird vorgeschlagen — RAR und 7z kann der Installer
-derzeit nicht entpacken, ein Vorschlag würde beim Entpacken scheitern.
+Datei-Auswahl — direkt im Downloads-Ordner. Vorgeschlagen und entpackt
+werden `.zip`, `.rar` und `.7z`; die beiden Listen (Suche und Installer)
+hängen an einem gemeinsamen Test, damit nie ein Format vorgeschlagen wird,
+das der Installer nicht öffnen kann.
 
 ## Sub-Path-Rotation
 

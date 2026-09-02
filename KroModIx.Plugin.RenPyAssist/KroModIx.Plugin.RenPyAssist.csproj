@@ -25,6 +25,9 @@
     <PackageReference Include="Razorvine.Pickle" />
     <!-- Animierte GIF-Cover in Detail-View (v0.11+). -->
     <PackageReference Include="Avalonia.Labs.Gif" />
+    <!-- Kein PrivateAssets/ExcludeAssets: SharpCompress muss ins Bundle, der
+         Host bringt es nicht mit. -->
+    <PackageReference Include="SharpCompress" />
   </ItemGroup>
 
   <ItemGroup>

@@ -2,7 +2,7 @@
   <ItemGroup>
     <!-- v1.18.0: IHostServices.Images (zentraler Bild-Decoder-Baukasten,
          WebP/AVIF/DDS-Fallbacks + Thread-Affinity). -->
-    <PackageVersion Include="KroModIx.Plugin.Contracts" Version="1.27.0" />
+    <PackageVersion Include="KroModIx.Plugin.Contracts" Version="1.28.0" />
     <PackageVersion Include="Avalonia" Version="12.1.0" />
     <PackageVersion Include="CommunityToolkit.Mvvm" Version="8.4.2" />
     <PackageVersion Include="MinVer" Version="7.0.0" />
@@ -15,6 +15,9 @@
          Avalonia-Labs-Fork, passt zu Avalonia 12. Sidebar-Kachel bleibt
          weiter Bitmap (repraesentatives Frame via ffmpeg-thumbnail). -->
     <PackageVersion Include="Avalonia.Labs.Gif" Version="12.0.2" />
+    <!-- v0.21.0: RAR/7z-Updates entpacken. 1.0.0 ist die erste Version ohne
+         CVE GHSA-6c8g-7p36-r338 (0.42 ist betroffen). -->
+    <PackageVersion Include="SharpCompress" Version="1.0.0" />
     <!-- Tests (v0.17.1+) -->
     <PackageVersion Include="xunit.v3" Version="3.2.2" />
     <PackageVersion Include="xunit.runner.visualstudio" Version="3.1.5" />
