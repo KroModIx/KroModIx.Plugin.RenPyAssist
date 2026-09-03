@@ -56,31 +56,14 @@
   restauriert Cookies beim Startup, triggert Initial-Rescan im
   Hintergrund, startet Worker + DownloadWatcher.
 
-## v0.1.0 — was drin ist
+## Stand
 
-- Games-Tab (Card-Liste, Rescan/Update-Check/Install-Update/Play/
-  Ordner/Remove).
-- Settings-Tab (Root, Downloads-Watch, Interval, f95zone-Login).
-- Sub-Path-Rotation komplett (Detect + Install + Save-Copy).
-- f95zone-Login mit verschlüsselter Cookie-Persistenz.
-- Cover-Cache mit AVIF/WebP → PNG via ImageSharp.
-- Worker pollt in Intervall + `CheckNowAsync` für „Jetzt prüfen".
-- DownloadWatcher meldet stabile ZIPs als Notification.
-- IUpdateNotifier feuert Sidebar-Badge (Summe HasUpdate).
+Die maßgebliche Feature-Liste steht in der `description` in `plugin.json` —
+sie wird bei jedem Release mitgepflegt und ist damit die einzige Stelle, die
+nicht veralten kann. Ergänzend die GitHub-Releases des Repos.
 
-## v0.2 — Roadmap
-
-- **Ordner-basierter Discovery-Contract im Host** — `IFolderGameProvider`
-  o. ä., damit die Registry-Einträge direkt als Sidebar-Kacheln erscheinen
-  statt via Proton-Anchor.
-- **Auto-Match-Dialog**: neue Container mit ähnlichem Namen → Vorschlag
-  aus f95zone-Search, User klickt „✓ verknüpfen".
-- **Download-Zuordnung**: stabile ZIP im Downloads-Ordner → Auto-Match
-  gegen bekannte Games (Name-Fuzzy) → Vorschlag „⬆ Install als Update
-  für X".
-- **DownloadLinkExtractor** (analog RenPack) — Thread-HTML nach
-  Mega/Workupload/Pixeldrain-Links parsen, im UI anzeigen.
-- **Versions-Historie pro Game** — alte Sub-Ordner aufräumen-Button.
+Hier bewusst keine Versions-Momentaufnahme: die vorherige Fassung dieser Datei
+beschrieb noch v0.1.0, während das Repo längst deutlich weiter war.
 
 ## Kernkonzepte
 
