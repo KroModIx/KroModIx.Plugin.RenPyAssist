@@ -25,10 +25,12 @@ public sealed class RenPyAssistPlugin : IGameModPlugin, IUpdateNotifier, IGameLa
     public PluginMetadata Metadata { get; } = new(
         Id: "kroste.renpyassist",
         DisplayName: "Ren'Py Assist",
-        Version: "0.16.2",
+        Version: "0.22.0",
         Author: "Kroste",
         Description: "Verwaltet Ren'Py-Spiele als eigenständige Sidebar-Kacheln " +
-            "(Multi-Tile). v0.16.2: Auto-Chmod vor Launch — setzt +x auf .sh + " +
+            "(Multi-Tile). v0.22.0: OnGameAddedAsync implementiert — ein zur " +
+            "Laufzeit hinzugefuegtes Spiel landet sofort in der Registry statt " +
+            "erst nach dem naechsten App-Neustart. v0.16.2: Auto-Chmod vor Launch — setzt +x auf .sh + " +
             "lib/py*-linux-*/-Binaries (Ren'Py-Spiele als ZIP von Windows " +
             "entpackt haben oft keine Unix-Exec-Bits, Launcher scheitert dann " +
             "mit Permission-denied). Best-effort, Fehler nur ins Log. " +
@@ -130,7 +132,8 @@ public sealed class RenPyAssistPlugin : IGameModPlugin, IUpdateNotifier, IGameLa
                     game.Target.DisplayName, game.InstallDir);
                 continue;
             }
-            _registry.EnsureFromContainer(game.InstallDir);
+            var entry = RegisterContainer(host, game);
+            if (entry is null) continue;
             registered++;
             // v0.8.4: GIF-Cover-Migration. Wenn die coverUrl auf .gif endet
             // und der Cache noch keinen v084-Marker hat, wurde das Bild mit
@@ -138,30 +141,17 @@ public sealed class RenPyAssistPlugin : IGameModPlugin, IUpdateNotifier, IGameLa
             // Mirror löschen und Cache-Warm im Hintergrund anwerfen — die
             // Kachel bleibt kurz bildlos statt ein blankes weisses Cover zu
             // zeigen. Nach Fetch: TrySetManualGameCover setzt die Kachel neu.
-            var entry = _registry.Find(game.InstallDir);
+            // Nur beim Start — ein frisch hinzugefuegtes Spiel hat noch gar
+            // kein Alt-Cover das migriert werden koennte.
             var mirrorPath = GameLocalStore.CoverPath(game.InstallDir);
-            if (entry is not null
-                && !string.IsNullOrEmpty(entry.CoverUrl)
+            if (!string.IsNullOrEmpty(entry.CoverUrl)
                 && _covers.NeedsV084GifMigration(entry.CoverUrl!)
                 && File.Exists(mirrorPath))
             {
                 try { File.Delete(mirrorPath); } catch { }
                 gifMigrationJobs.Add((game, entry.CoverUrl!));
             }
-            // Cover-Path an Host propagieren (falls schon lokal gespeichert).
-            var sidebar = GameLocalStore.SidebarCoverPath(game.InstallDir);
-            var full = GameLocalStore.CoverPath(game.InstallDir);
-            var coverToUse = File.Exists(sidebar) ? sidebar
-                           : File.Exists(full) ? full : null;
-            if (coverToUse is not null)
-            {
-                try
-                {
-                    if (host.TrySetManualGameCover(game.InstallDir, coverToUse))
-                        coversPropagated++;
-                }
-                catch (Exception ex) { host.Logger.Debug(ex, "Cover-Init-Propagate: {Dir}", game.InstallDir); }
-            }
+            if (PropagateLocalCover(host, game.InstallDir)) coversPropagated++;
         }
 
         // v0.8.4: GIF-Migration-Jobs im Hintergrund (fire-and-forget) —
@@ -208,6 +198,74 @@ public sealed class RenPyAssistPlugin : IGameModPlugin, IUpdateNotifier, IGameLa
             "{C} Cover propagiert, {G} GIF-Migration(en) im Hintergrund, watchDir='{Dl}'",
             registered, coversPropagated, gifMigrationJobs.Count, dlDir);
         return Task.CompletedTask;
+    }
+
+    /// <summary>v0.22.0: Der Host meldet eine Kachel die ZUR LAUFZEIT
+    /// dazugekommen ist (Ordner-Scan-Wizard, „➕ Spiel hinzufuegen", oder das
+    /// Reconcile-Sicherheitsnetz des Hosts). Ohne diesen Override lief die
+    /// Default-Implementation aus dem Contract — also nichts — und das neue
+    /// Spiel tauchte in der Registry erst nach einem App-Neustart auf: Kachel
+    /// da, Ren'Py-Tabs leer, keine Version, kein Cover.
+    ///
+    /// <para>Contracts v1.16.0+; der Host ruft das aus
+    /// <c>PluginActivator.NotifyGameAddedAsync</c>, nachdem er das Spiel
+    /// selbst in <c>LoadedPlugin.DetectedGames</c> aufgenommen hat.</para></summary>
+    public Task OnGameAddedAsync(DetectedGame game, CancellationToken ct = default)
+    {
+        if (_host is null || _registry is null || _covers is null)
+            return Task.CompletedTask;
+
+        var entry = RegisterContainer(_host, game);
+        if (entry is null) return Task.CompletedTask;
+
+        PropagateLocalCover(_host, game.InstallDir);
+
+        // _activatedGames mitziehen — sonst uebersieht GetPendingUpdatesAsync
+        // die neue Kachel und der Update-Badge bliebe fuer sie tot.
+        if (!_activatedGames.Any(g => string.Equals(
+                g.InstallDir, game.InstallDir, StringComparison.OrdinalIgnoreCase)))
+        {
+            _activatedGames = _activatedGames.Append(game).ToList();
+        }
+
+        _host.Logger.Info("Ren'Py-Kachel zur Laufzeit uebernommen: '{Name}' (sub={Sub}, v{Ver})",
+            entry.Name, entry.ActiveSubPath ?? "<legacy>", entry.LocalVersion ?? "-");
+        return Task.CompletedTask;
+    }
+
+    /// <summary>Legt den Registry-Eintrag fuer einen Container an (idempotent)
+    /// und liefert ihn zurueck. Null = InstallDir fehlt oder existiert nicht.
+    /// Gemeinsamer Pfad von <see cref="InitializeAsync"/> und
+    /// <see cref="OnGameAddedAsync"/>, damit die beiden nicht auseinander
+    /// laufen.</summary>
+    private RenPyGame? RegisterContainer(IHostServices host, DetectedGame game)
+    {
+        if (string.IsNullOrWhiteSpace(game.InstallDir) || !Directory.Exists(game.InstallDir))
+        {
+            host.Logger.Warn("Ren'Py-Kachel '{Name}' ignoriert — InstallDir fehlt: {Dir}",
+                game.Target.DisplayName, game.InstallDir);
+            return null;
+        }
+        return _registry!.EnsureFromContainer(game.InstallDir);
+    }
+
+    /// <summary>Schiebt ein bereits lokal liegendes Cover an den Host, damit die
+    /// Sidebar-Kachel sofort ein Bild hat. Prioritaet: User-Crop
+    /// (<c>.renpyassist/sidebar-cover.png</c>) vor Container-Cover
+    /// (<c>.renpyassist/cover.img</c>). Rueckgabe true = gesetzt.</summary>
+    private static bool PropagateLocalCover(IHostServices host, string containerPath)
+    {
+        var sidebar = GameLocalStore.SidebarCoverPath(containerPath);
+        var full = GameLocalStore.CoverPath(containerPath);
+        var coverToUse = File.Exists(sidebar) ? sidebar
+                       : File.Exists(full) ? full : null;
+        if (coverToUse is null) return false;
+        try { return host.TrySetManualGameCover(containerPath, coverToUse); }
+        catch (Exception ex)
+        {
+            host.Logger.Debug(ex, "Cover-Propagate: {Dir}", containerPath);
+            return false;
+        }
     }
 
     public IEnumerable<IGameTabContribution> GetTabContributions(DetectedGame game)
