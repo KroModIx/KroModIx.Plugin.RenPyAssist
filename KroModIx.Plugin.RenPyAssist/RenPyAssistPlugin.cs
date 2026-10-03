@@ -95,7 +95,7 @@ public sealed class RenPyAssistPlugin : IGameModPlugin, IUpdateNotifier, IGameLa
         _covers = new CoverCache(_paths.CoverCacheDir, _f95);
         _worker = new RenPyWorker(_registry, _f95, _settings, _covers, host);
         _downloadWatcher = new DownloadWatcher();
-        _installer = new GameUpdateInstaller(_registry);
+        _installer = new GameUpdateInstaller(_registry, host.Archives);
         _updateFlow = new GameUpdateFlow(_installer, _registry, _settings, host);
         _rpaService = new RenpyArchiveService();
         _saveService = new RenpySaveService();

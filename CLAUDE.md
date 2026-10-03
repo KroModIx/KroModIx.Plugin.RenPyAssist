@@ -102,3 +102,32 @@ beschrieb noch v0.1.0, während das Repo längst deutlich weiter war.
 - **Kein Enable/Disable pro Spiel** — Update-Install ist immer aktiv.
   Alte Sub-Ordner bleiben liegen und können manuell im Filesystem
   weggeräumt werden.
+
+## Archive kommen aus dem Host (ab v0.22.0)
+
+`GameUpdateInstaller` bekommt `IHostServices.Archives`; SharpCompress ist aus
+dem Plugin verschwunden. Die drei anderen Pakete bleiben plugin-eigen —
+AVIF/WebP-Cover (ImageSharp), Python-Pickle und animierte GIFs bringt der
+Host nicht mit.
+
+**Wichtiger als die gesparte Abhängigkeit: ein Ausbruchsversuch bricht den
+Einbau ab.** Der eigene Schutz war richtig gerechnet, übersprang den
+abgelehnten Eintrag aber **still** und ließ den Einbau weiterlaufen. Hier
+war das schlimmer als in den anderen Plugins: die Schritte danach (neuen
+Unterordner ermitteln, Spielstände kopieren, alten Unterordner löschen)
+arbeiteten dann auf einem halb entpackten Stand — und am Ende wird der alte
+Unterordner **samt Spielständen** gelöscht. Jetzt bricht der Einbau ab,
+bevor irgendetwas am alten Stand passiert, und die Meldung sagt das auch
+(„Der alte Stand samt Spielständen ist unangetastet.").
+
+**Was bewusst nicht migriert ist:** `RenpySaveService`. Der **erzeugt**
+ZIP-Dateien (Spielstand-Bündel), und dafür hat der Host-Baukasten keine
+Schnittstelle — er liest und packt aus, er packt nicht ein. Dasselbe gilt
+für Icarus' `PakBackupService` und LS25' `ModBackupService`.
+
+**Der Installer war ungetestet.** Jetzt sechs Tests: beide Layouts
+(Versions-Unterordner und flaches Archiv), dass die Spielstände mitwandern,
+beide Ausbruch-Fälle mit der Zusage, dass der alte Stand stehen bleibt, die
+Inhaltsprüfung und der Endungs-Vorfilter. Die Tests nutzen
+`KroModIx.Plugin.TestKit` und bleiben bei `Assert` statt FluentAssertions —
+das ist die Konvention dieses Testprojekts.

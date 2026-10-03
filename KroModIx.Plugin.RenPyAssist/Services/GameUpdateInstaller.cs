@@ -1,11 +1,12 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.IO.Compression;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
+using KroModIx.Plugin.Contracts;
 using NLog;
-using SharpCompress.Archives;
 
 namespace KroModIx.Plugin.RenPyAssist.Services;
 
@@ -32,11 +33,20 @@ public sealed class GameUpdateInstaller
     private static readonly Logger Log = LogManager.GetCurrentClassLogger();
 
     private readonly GamesRegistry _registry;
+    private readonly IArchiveService _archives;
 
-    public GameUpdateInstaller(GamesRegistry registry)
+    public GameUpdateInstaller(GamesRegistry registry, IArchiveService archives)
     {
         _registry = registry;
+        _archives = archives;
     }
+
+    /// <summary>Endungs-Vorfilter fuer die Archiv-Auswahl. Kommt aus dem
+    /// Host-Baukasten, damit ein dort neu unterstuetztes Format nicht in
+    /// neun Plugins nachgetragen werden muss.</summary>
+    public IReadOnlyList<string> SupportedExtensions => _archives.SupportedExtensions;
+
+    public bool HasSupportedExtension(string path) => _archives.HasSupportedExtension(path);
 
     public async Task<InstallResult> InstallAsync(RenPyGame game, string zipPath, CancellationToken ct = default)
     {
@@ -62,15 +72,22 @@ public sealed class GameUpdateInstaller
 
             // 2. Archiv entpacken.
             //
-            // v0.21.0: ZIP, RAR und 7z ueber SharpCompress statt nur ZIP.
-            // f95zone-Releases kommen in allen dreien; vorher scheiterte ein
-            // RAR-Download erst beim Entpacken mit einer Format-Exception.
-            await Task.Run(() =>
+            // v0.21.0: ZIP, RAR und 7z statt nur ZIP. f95zone-Releases kommen
+            // in allen dreien; vorher scheiterte ein RAR-Download erst beim
+            // Entpacken mit einer Format-Exception.
+            // v0.22.0: ueber IHostServices.Archives statt SharpCompress im
+            // Plugin — und mit einer Meldung statt eines stillen
+            // Uebersprungs, siehe unten.
+            if (_archives.DetectKind(zipPath) == ArchiveKind.Unknown)
+                return InstallResult.Fail(
+                    "Das ist kein lesbares Archiv (ZIP/RAR/7z) — eventuell ein "
+                    + "abgebrochener Download.");
+
+            var abgelehnt = await Task.Run(() =>
             {
-                using var archive = ArchiveFactory.Open(zipPath);
-                var entries = archive.Entries.Where(e => !e.IsDirectory).ToList();
+                var entries = _archives.List(zipPath);
                 var topLevelDirs = entries
-                    .Select(e => (e.Key ?? "").Replace('\\', '/').Split('/')[0])
+                    .Select(e => e.Path.Split('/')[0])
                     .Where(p => !string.IsNullOrEmpty(p))
                     .Distinct(StringComparer.OrdinalIgnoreCase)
                     .ToList();
@@ -82,21 +99,27 @@ public sealed class GameUpdateInstaller
                     : game.ContainerPath;
                 Directory.CreateDirectory(target);
 
-                foreach (var entry in entries)
-                {
-                    ct.ThrowIfCancellationRequested();
-                    var rel = (entry.Key ?? "").Replace('\\', '/');
-                    if (!TryResolveSafe(target, rel, out var dst))
-                    {
-                        Log.Warn("Zip-Slip im Update-Archiv uebersprungen: {Entry}", rel);
-                        continue;
-                    }
-                    Directory.CreateDirectory(Path.GetDirectoryName(dst)!);
-                    using var input = entry.OpenEntryStream();
-                    using var output = File.Create(dst);
-                    input.CopyTo(output);
-                }
-            }, ct);
+                var r = _archives.Extract(zipPath, target);
+                return r.SkippedUnsafe;
+            }, ct).ConfigureAwait(false);
+
+            // Ein Ausbruchsversuch beendet den Einbau hier, statt die Dateien
+            // zu nehmen die durchkamen. Vorher wurde der Eintrag nur
+            // protokolliert und der Einbau lief weiter — mit dem Ergebnis,
+            // dass die Schritte 3 bis 6 auf einem halb entpackten Stand
+            // arbeiteten und am Ende der alte Unterordner mit den
+            // Spielstaenden geloescht worden waere.
+            if (abgelehnt.Count > 0)
+            {
+                Log.Warn("Ausbruchsversuch im Update-Archiv, {Count} Eintrag/Eintraege "
+                    + "abgelehnt: {Entries}", abgelehnt.Count, string.Join(", ", abgelehnt));
+                return InstallResult.Fail(
+                    $"Abgebrochen: {abgelehnt.Count} Eintrag/Eintraege im Archiv wollten aus "
+                    + "dem Spielordner herausschreiben — "
+                    + string.Join(", ", abgelehnt.Take(3))
+                    + (abgelehnt.Count > 3 ? ", …" : "")
+                    + ". Der alte Stand samt Spielstaenden ist unangetastet.");
+            }
 
             // 3. Neuen Sub-Ordner ermitteln (diff gegen subsBefore + game/-Marker).
             var subsAfter = Directory.EnumerateDirectories(game.ContainerPath).ToList();
@@ -212,26 +235,6 @@ public sealed class GameUpdateInstaller
         }
     }
 
-    /// <summary>Zip-Slip-Guard: loest den Archiv-Pfad gegen die Ziel-Wurzel
-    /// auf und akzeptiert nur, was per GetFullPath wirklich darunter landet.
-    /// Deckt auch absolute Eintraege (<c>/etc/…</c>, <c>C:\…</c>) ab, die ein
-    /// reiner ".."-Check durchlaesst.</summary>
-    internal static bool TryResolveSafe(string root, string relative, out string destination)
-    {
-        destination = "";
-        if (string.IsNullOrWhiteSpace(relative)) return false;
-        var rel = relative.Replace('\\', Path.DirectorySeparatorChar)
-                          .Replace('/', Path.DirectorySeparatorChar);
-        if (Path.IsPathRooted(rel)) return false;
-        var rootFull = Path.GetFullPath(root).TrimEnd(Path.DirectorySeparatorChar)
-                       + Path.DirectorySeparatorChar;
-        string full;
-        try { full = Path.GetFullPath(Path.Combine(rootFull, rel)); }
-        catch { return false; }
-        if (!full.StartsWith(rootFull, StringComparison.Ordinal)) return false;
-        destination = full;
-        return true;
-    }
 
     /// <summary>Zaehlt Dateien und Gesamtgroesse in Quelle und Ziel gegen.
     /// Ein Copy, der die Haelfte geschafft hat und dann abgebrochen ist,

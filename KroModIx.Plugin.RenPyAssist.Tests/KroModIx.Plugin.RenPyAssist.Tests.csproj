@@ -15,6 +15,7 @@
          deshalb mit ExcludeAssets=runtime. Fuer die Tests muss die DLL aber
          im Output liegen, sonst FileNotFoundException beim ersten Zugriff. -->
     <PackageReference Include="KroModIx.Plugin.Contracts" />
+    <PackageReference Include="KroModIx.Plugin.TestKit" />
     <PackageReference Include="xunit.runner.visualstudio">
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
       <PrivateAssets>all</PrivateAssets>
