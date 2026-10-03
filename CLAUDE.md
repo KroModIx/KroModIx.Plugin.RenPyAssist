@@ -103,7 +103,7 @@ beschrieb noch v0.1.0, während das Repo längst deutlich weiter war.
   Alte Sub-Ordner bleiben liegen und können manuell im Filesystem
   weggeräumt werden.
 
-## Archive kommen aus dem Host (ab v0.22.0)
+## Archive kommen aus dem Host (ab v0.23.0)
 
 `GameUpdateInstaller` bekommt `IHostServices.Archives`; SharpCompress ist aus
 dem Plugin verschwunden. Die drei anderen Pakete bleiben plugin-eigen —

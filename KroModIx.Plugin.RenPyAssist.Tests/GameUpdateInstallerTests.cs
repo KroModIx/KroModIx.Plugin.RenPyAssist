@@ -9,7 +9,7 @@ using Xunit;
 namespace KroModIx.Plugin.RenPyAssist.Tests;
 
 /// <summary>Der Einbau eines Update-Archivs. Geprüft wird die Entscheidung
-/// des Plugins, nicht das Auspacken selbst — das macht seit v0.22.0 der
+/// des Plugins, nicht das Auspacken selbst — das macht seit v0.23.0 der
 /// Host-Baukasten.
 ///
 /// <para><b>Was sich geändert hat:</b> der eigene Ausbruch-Schutz war

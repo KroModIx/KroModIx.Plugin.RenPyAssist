@@ -73,7 +73,7 @@ public sealed class UpdateArchiveFinderTests : IDisposable
     [Fact]
     public void RAR_und_7z_zaehlen_seit_v0_21_mit()
     {
-        // Der Installer entpackt seit v0.21.0 alle drei Formate (seit v0.22.0
+        // Der Installer entpackt seit v0.21.0 alle drei Formate (seit v0.23.0
         // ueber den Host-Archiv-Baukasten), also darf
         // die Suche sie auch vorschlagen. Vorher waeren das Treffer gewesen,
         // die erst nach der Bestaetigung beim Entpacken scheitern.

@@ -25,7 +25,7 @@
     <PackageReference Include="Razorvine.Pickle" />
     <!-- Animierte GIF-Cover in Detail-View (v0.11+). -->
     <PackageReference Include="Avalonia.Labs.Gif" />
-    <!-- v0.22.0: SharpCompress ist raus — Archive oeffnet der Host
+    <!-- v0.23.0: SharpCompress ist raus — Archive oeffnet der Host
          (IHostServices.Archives). Die anderen drei bleiben plugin-eigen:
          AVIF/WebP-Cover, Python-Pickle und animierte GIFs bringt der Host
          nicht mit. -->

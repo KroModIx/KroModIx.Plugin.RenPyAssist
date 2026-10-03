@@ -3,7 +3,7 @@
     <!-- v1.18.0: IHostServices.Images (zentraler Bild-Decoder-Baukasten,
          WebP/AVIF/DDS-Fallbacks + Thread-Affinity). -->
     <PackageVersion Include="KroModIx.Plugin.Contracts" Version="1.33.0" />
-    <!-- v0.22.0: Attrappen der Host-Baukaesten fuer das Testprojekt, aus
+    <!-- v0.23.0: Attrappen der Host-Baukaesten fuer das Testprojekt, aus
          demselben Tag wie die Contracts. -->
     <PackageVersion Include="KroModIx.Plugin.TestKit" Version="1.33.0" />
     <PackageVersion Include="Avalonia" Version="12.1.0" />

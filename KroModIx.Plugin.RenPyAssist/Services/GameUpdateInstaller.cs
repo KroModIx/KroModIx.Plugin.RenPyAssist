@@ -75,7 +75,7 @@ public sealed class GameUpdateInstaller
             // v0.21.0: ZIP, RAR und 7z statt nur ZIP. f95zone-Releases kommen
             // in allen dreien; vorher scheiterte ein RAR-Download erst beim
             // Entpacken mit einer Format-Exception.
-            // v0.22.0: ueber IHostServices.Archives statt SharpCompress im
+            // v0.23.0: ueber IHostServices.Archives statt SharpCompress im
             // Plugin — und mit einer Meldung statt eines stillen
             // Uebersprungs, siehe unten.
             if (_archives.DetectKind(zipPath) == ArchiveKind.Unknown)
