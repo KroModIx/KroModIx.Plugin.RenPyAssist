@@ -157,3 +157,90 @@ public sealed class GameUpdateInstallerTests : IDisposable
         Assert.False(_sut.HasSupportedExtension("liesmich.txt"));
     }
 }
+
+/// <summary>Die destruktivste Stelle des Plugins: nach einem Einbau wird der
+/// alte Versions-Unterordner <b>rekursiv</b> gelöscht, im Spielordner des
+/// Nutzers, und dort liegen Spielstände.
+///
+/// <para>Von den zehn löschenden Pfaden dieses Plugins ist dies der einzige,
+/// der überhaupt ins Verzeichnis des Nutzers greift — die anderen neun
+/// betreffen Cover-Zwischenspeicher, Einstellungen, Sitzungsdaten und
+/// Temp-Dateien des Plugins selbst. Deshalb bekommt nur diese eine die
+/// Verweis-Prüfung.</para></summary>
+public sealed class AlterOrdnerLoeschenTests : IDisposable
+{
+    private readonly string _tmp = Directory.CreateTempSubdirectory("renpy-altloeschen").FullName;
+    private readonly string _container;
+    private readonly FakeHostServices _host;
+    private readonly GameUpdateInstaller _sut;
+
+    public AlterOrdnerLoeschenTests()
+    {
+        _container = Path.Combine(_tmp, "MeinSpiel");
+        Directory.CreateDirectory(_container);
+        var archives = new FakeArchiveService();
+        _host = new FakeHostServices(Path.Combine(_tmp, "host")) { Archives = archives };
+        _sut = new GameUpdateInstaller(new GamesRegistry(new RenPyPaths(_host)), archives);
+    }
+
+    public void Dispose()
+    {
+        try { Directory.Delete(_tmp, recursive: true); } catch { /* Aufräumen darf scheitern */ }
+    }
+
+    private string Zip(string name, params string[] eintraege)
+    {
+        var p = Path.Combine(_tmp, name);
+        using var a = ZipFile.Open(p, ZipArchiveMode.Create);
+        foreach (var e in eintraege) { using var s = a.CreateEntry(e).Open(); s.Write([1]); }
+        return p;
+    }
+
+    private RenPyGame Spiel(string alterUnterordner) => new()
+    {
+        Name = "MeinSpiel",
+        ContainerPath = _container,
+        ActiveSubPath = alterUnterordner,
+        LocalVersion = "0.8.0",
+    };
+
+    /// <summary>Normalfall, unverändert: ein echter alter Ordner wird nach dem
+    /// Einbau gelöscht.</summary>
+    [Fact]
+    public async Task Ein_echter_alter_Ordner_wird_geloescht()
+    {
+        var alt = Path.Combine(_container, "MeinSpiel-0.8.0-pc");
+        Directory.CreateDirectory(Path.Combine(alt, "game", "saves"));
+        File.WriteAllText(Path.Combine(alt, "game", "saves", "1-1.save"), "Stand");
+
+        var r = await _sut.InstallAsync(Spiel("MeinSpiel-0.8.0-pc"),
+            Zip("MeinSpiel-0.9.0-pc.zip", "MeinSpiel-0.9.0-pc/game/script.rpa"),
+            TestContext.Current.CancellationToken);
+
+        Assert.True(r.Success, r.Error ?? "");
+        Assert.False(Directory.Exists(alt));
+    }
+
+    /// <summary>Ist der alte Ordner ein <b>Verweis</b> — etwa weil der Nutzer
+    /// seine Fassungen auf eine andere Platte legt — bleibt er stehen. Ein
+    /// rekursives Löschen darauf ist nicht das, was jemand erwartet, der
+    /// bewusst verlinkt hat.</summary>
+    [Fact]
+    public async Task Ein_verwiesener_alter_Ordner_bleibt_stehen()
+    {
+        var woanders = Path.Combine(_tmp, "andere-platte", "MeinSpiel-0.8.0-pc");
+        Directory.CreateDirectory(Path.Combine(woanders, "game", "saves"));
+        File.WriteAllText(Path.Combine(woanders, "game", "saves", "1-1.save"), "Stand");
+        var link = Path.Combine(_container, "MeinSpiel-0.8.0-pc");
+        Directory.CreateSymbolicLink(link, woanders);
+
+        var r = await _sut.InstallAsync(Spiel("MeinSpiel-0.8.0-pc"),
+            Zip("MeinSpiel-0.9.0-pc.zip", "MeinSpiel-0.9.0-pc/game/script.rpa"),
+            TestContext.Current.CancellationToken);
+
+        Assert.True(r.Success, r.Error ?? "");
+        Assert.True(Directory.Exists(link), "der Verweis bleibt");
+        Assert.True(File.Exists(Path.Combine(woanders, "game", "saves", "1-1.save")),
+            "und das Ziel samt Spielstaenden erst recht");
+    }
+}

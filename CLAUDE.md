@@ -131,3 +131,21 @@ beide Ausbruch-Fälle mit der Zusage, dass der alte Stand stehen bleibt, die
 Inhaltsprüfung und der Endungs-Vorfilter. Die Tests nutzen
 `KroModIx.Plugin.TestKit` und bleiben bei `Assert` statt FluentAssertions —
 das ist die Konvention dieses Testprojekts.
+
+## Der alte Unterordner wird nicht gelöscht, wenn er ein Verweis ist (ab v0.24.0)
+
+Nach einem Einbau löscht `GameUpdateInstaller` den alten
+Versions-Unterordner — **rekursiv**, im Spielordner des Nutzers, und dort
+liegen Spielstände. Das ist die destruktivste Stelle im ganzen Plugin.
+
+Seit v0.24.0 bleibt er stehen, wenn `ForeignManagerDetection` ihn als Verweis
+erkennt. Wer seine Fassungen bewusst auf eine andere Platte verlinkt, soll
+dort nicht überrascht werden.
+
+**Warum nur diese eine Stelle und nicht alle zehn.** Nachgezählt: von den zehn
+löschenden Pfaden greift genau **einer** ins Verzeichnis des Nutzers. Die
+anderen neun sind Cover-Zwischenspeicher, Einstellungen, f95zone-Sitzung und
+Temp-Dateien — alles plugin-eigen. Und anders als bei den acht
+Mod-Plugins liefert in einen Ren'Py-Spielordner kein konkurrierender
+Mod-Manager aus; die Prüfung dient hier dem verlinkenden Nutzer, nicht einem
+fremden Werkzeug.

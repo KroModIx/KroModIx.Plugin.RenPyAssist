@@ -190,7 +190,19 @@ public sealed class GameUpdateInstaller
                 && savesSecured)
             {
                 var oldFullDir = Path.Combine(game.ContainerPath, oldSubPath);
-                if (Directory.Exists(oldFullDir))
+                // v0.24.0: NICHT loeschen, wenn der alte Unterordner ein
+                // Verweis ist oder einem anderen Werkzeug gehoert. Das ist die
+                // destruktivste Stelle im ganzen Plugin — rekursiv, im
+                // Spielordner des Nutzers, und dort liegen Spielstaende. Wer
+                // seine Fassungen auf eine andere Platte verweist, soll hier
+                // nicht ueberrascht werden; stattdessen bleibt der Ordner
+                // stehen und es steht im Protokoll.
+                if (ForeignManagerDetection.IsForeignManaged(oldFullDir, out var verwalter))
+                {
+                    Log.Info("Alter Sub-Ordner bleibt stehen, er ist ein Verweis bzw. "
+                        + "gehoert {Verwalter}: {Old}", verwalter, oldFullDir);
+                }
+                else if (Directory.Exists(oldFullDir))
                 {
                     try
                     {
