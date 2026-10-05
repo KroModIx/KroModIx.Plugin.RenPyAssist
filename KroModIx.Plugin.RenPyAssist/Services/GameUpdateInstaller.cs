@@ -234,6 +234,14 @@ public sealed class GameUpdateInstaller
             //    ein noch neueres Update rauskommt, zeigt der Badge dann wieder.
             game.ActiveSubPath = newSubName;
             game.LocalVersion = RenPyGameDetector.ExtractVersion(newSubName);
+
+            // v0.23.0: frisch entpackt heisst unter Linux fast immer „ohne
+            // Exec-Bits" — ZIP transportiert keine Unix-Permissions. Hier
+            // nachziehen, damit das Spiel sofort startet, auch von Hand.
+            var patched = ExecutableBits.Apply(Path.Combine(game.ContainerPath, newSubName));
+            if (patched > 0)
+                Log.Info("ExecutableBits: +x auf {N} Datei(en) nach dem Update in {Sub}",
+                    patched, newSubName);
             if (!string.IsNullOrEmpty(game.LocalVersion))
                 game.LastRemoteVersion = game.LocalVersion;
             _registry.Update(game);

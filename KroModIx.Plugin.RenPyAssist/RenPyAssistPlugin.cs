@@ -25,10 +25,11 @@ public sealed class RenPyAssistPlugin : IGameModPlugin, IUpdateNotifier, IGameLa
     public PluginMetadata Metadata { get; } = new(
         Id: "kroste.renpyassist",
         DisplayName: "Ren'Py Assist",
-        Version: "0.22.0",
+        Version: "0.23.0",
         Author: "Kroste",
         Description: "Verwaltet Ren'Py-Spiele als eigenständige Sidebar-Kacheln " +
-            "(Multi-Tile). v0.22.0: OnGameAddedAsync implementiert — ein zur " +
+            "(Multi-Tile). v0.23.0: Exec-Bits beim Registrieren und nach jedem Update " +
+            "statt erst beim Start; lib/linux-* (Ren'Py 7) wird jetzt mit erfasst. v0.22.0: OnGameAddedAsync implementiert — ein zur " +
             "Laufzeit hinzugefuegtes Spiel landet sofort in der Registry statt " +
             "erst nach dem naechsten App-Neustart. v0.16.2: Auto-Chmod vor Launch — setzt +x auf .sh + " +
             "lib/py*-linux-*/-Binaries (Ren'Py-Spiele als ZIP von Windows " +
@@ -246,7 +247,21 @@ public sealed class RenPyAssistPlugin : IGameModPlugin, IUpdateNotifier, IGameLa
                 game.Target.DisplayName, game.InstallDir);
             return null;
         }
-        return _registry!.EnsureFromContainer(game.InstallDir);
+        var entry = _registry!.EnsureFromContainer(game.InstallDir);
+
+        // v0.23.0: Exec-Bits gleich hier nachziehen, nicht erst beim Start
+        // ueber KroModIx. Vorher war der Fix rein reaktiv — wer das Spiel von
+        // Hand startete (Dateimanager, Desktop-Verknuepfung), lief weiter in
+        // „Keine Berechtigung", und nach einem Update war der neue Sub-Ordner
+        // ohnehin wieder ohne Bits.
+        var buildDir = string.IsNullOrEmpty(entry.ActiveSubPath)
+            ? entry.ContainerPath
+            : Path.Combine(entry.ContainerPath, entry.ActiveSubPath!);
+        var patched = ExecutableBits.Apply(buildDir);
+        if (patched > 0)
+            host.Logger.Info("ExecutableBits: +x auf {N} Datei(en) in {Dir}", patched, buildDir);
+
+        return entry;
     }
 
     /// <summary>Schiebt ein bereits lokal liegendes Cover an den Host, damit die
@@ -359,24 +374,37 @@ public sealed class RenPyAssistPlugin : IGameModPlugin, IUpdateNotifier, IGameLa
             return Task.FromResult(true); // wir sind zuständig, keine Host-Fallback-Chance
         }
 
-        // v0.16.2: Ren'Py-Spiele als ZIP von Windows → unter Linux entpackt
-        // verlieren die +x-Bits auf lib/py3-linux-*/{CheatingWitches,python,
-        // pythonw,librenpython.so,zsync,zsyncmake}. Das .sh-Skript scheitert
-        // dann mit „Permission denied" in Zeile 63. Vor dem Start best-effort
-        // die Bits nachziehen — kostet Millisekunden, spart dem User den
-        // manuellen chmod-Roundtrip fuer jedes ZIP-Game.
-        EnsureLinuxExecutableBits(dir, _host.Logger);
+        // Letzte Absicherung vor dem Start. Der Hauptlauf passiert beim
+        // Registrieren und nach jedem Update (v0.23.0) — nur so startet das
+        // Spiel auch von Hand, ohne vorherigen Klick in KroModIx.
+        var patched = ExecutableBits.Apply(dir);
+        if (patched > 0)
+            _host.Logger.Info("ExecutableBits: +x auf {N} Datei(en) vor dem Start in {Dir}", patched, dir);
 
+        // v0.23.0: UseShellExecute=false + stderr umgeleitet. Vorher meldete
+        // das Plugin „Spiel gestartet", sobald Process.Start zurueckkam — und
+        // das kam auch zurueck, wenn das .sh seinerseits sofort mit Exitcode
+        // 126 starb („Keine Berechtigung" beim exec der Runtime). Der Erfolgs-
+        // Toast war also kein Beleg dafuer, dass irgendetwas lief, und der
+        // einzige Hinweis landete auf einem stderr, das niemand las.
         try
         {
-            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(launcher)
+            var psi = new System.Diagnostics.ProcessStartInfo(launcher)
             {
                 WorkingDirectory = dir,
-                UseShellExecute = true,
-            });
-            _host.Notifications.Notify(
-                string.Format(Strings.T("notify.game_started"), entry.DisplayName),
-                NotificationLevel.Success);
+                UseShellExecute = false,
+                RedirectStandardError = true,
+                RedirectStandardOutput = true,
+            };
+            var proc = System.Diagnostics.Process.Start(psi);
+            if (proc is null)
+            {
+                _host.Notifications.Notify(
+                    string.Format(Strings.T("notify.game_start_fail"), launcher),
+                    NotificationLevel.Error);
+                return Task.FromResult(true);
+            }
+            WatchLauncherAsync(proc, entry.DisplayName);
         }
         catch (Exception ex)
         {
@@ -388,6 +416,62 @@ public sealed class RenPyAssistPlugin : IGameModPlugin, IUpdateNotifier, IGameLa
         return Task.FromResult(true);
     }
 
+    /// <summary>Haengt sich an den gestarteten Launcher: stdout/stderr gehen
+    /// ins Log, und der Erfolgs-Toast kommt erst, wenn der Prozess die erste
+    /// Sekunde ueberlebt hat. Stirbt er vorher mit einem Fehlercode, meldet der
+    /// Toast genau das — mitsamt der letzten stderr-Zeile.
+    ///
+    /// <para>Die Wartezeit ist bewusst kurz: ein Ren'Py-Start, der ueberhaupt
+    /// anlaeuft, braucht laenger als eine Sekunde bis zum Fenster, und ein
+    /// Abbruch wie Exitcode 126 passiert sofort. Ein Spiel, das der User nach
+    /// zwei Sekunden selbst schliesst, soll keinen Fehler melden.</para></summary>
+    private void WatchLauncherAsync(System.Diagnostics.Process proc, string displayName)
+    {
+        var stderr = new System.Text.StringBuilder();
+        proc.EnableRaisingEvents = true;
+        proc.ErrorDataReceived += (_, e) =>
+        {
+            if (string.IsNullOrWhiteSpace(e.Data)) return;
+            lock (stderr) { if (stderr.Length < 4000) stderr.AppendLine(e.Data); }
+            _host?.Logger.Info("[{Game}] {Line}", displayName, e.Data);
+        };
+        proc.OutputDataReceived += (_, e) =>
+        {
+            if (!string.IsNullOrWhiteSpace(e.Data)) _host?.Logger.Debug("[{Game}] {Line}", displayName, e.Data);
+        };
+        proc.BeginErrorReadLine();
+        proc.BeginOutputReadLine();
+
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                var died = proc.WaitForExit(1500);
+                if (!died || proc.ExitCode == 0)
+                {
+                    _host?.Notifications.Notify(
+                        string.Format(Strings.T("notify.game_started"), displayName),
+                        NotificationLevel.Success);
+                    return;
+                }
+                string tail;
+                lock (stderr) tail = stderr.ToString().Trim();
+                if (tail.Length == 0) tail = $"Exitcode {proc.ExitCode}";
+                _host?.Logger.Warn("Ren'Py-Launcher '{Game}' endete sofort mit {Code}: {Err}",
+                    displayName, proc.ExitCode, tail);
+                _host?.Notifications.Notify(
+                    string.Format(Strings.T("notify.game_start_fail"),
+                        $"{displayName}: {tail.Split('\n').Last().Trim()}"),
+                    NotificationLevel.Error);
+            }
+            catch (Exception ex)
+            {
+                _host?.Logger.Debug(ex, "Launcher-Watch fehlgeschlagen: {Game}", displayName);
+            }
+            await Task.CompletedTask;
+        });
+    }
+
     private static string? FindRenpyLauncher(string dir)
     {
         if (!System.IO.Directory.Exists(dir)) return null;
@@ -395,49 +479,6 @@ public sealed class RenPyAssistPlugin : IGameModPlugin, IUpdateNotifier, IGameLa
             return System.IO.Directory.EnumerateFiles(dir, "*.sh").FirstOrDefault();
         return System.IO.Directory.EnumerateFiles(dir, "*.exe")
             .FirstOrDefault(f => !f.EndsWith("python.exe", StringComparison.OrdinalIgnoreCase));
-    }
-
-    /// <summary>v0.16.2: setzt +x auf alle Ren'Py-Runtime-Binaries im
-    /// Sub-Ordner (Linux-only). Deckt den haeufigen Fall dass ein Ren'Py-
-    /// Spiel als ZIP unter Windows gepackt und unter Linux entpackt wurde
-    /// — dabei gehen die Unix-Permissions verloren und das .sh-Skript
-    /// scheitert mit „Permission denied". Best-effort: Fehler nur ins
-    /// Debug-Log, Launcher-Start laeuft trotzdem (vielleicht klappt's
-    /// auch ohne alle Bits — z.B. wenn nur eine Datei betroffen ist).</summary>
-    private static void EnsureLinuxExecutableBits(string dir, NLog.Logger log)
-    {
-        if (!OperatingSystem.IsLinux()) return;
-        // Alle .sh im Sub-Ordner + alle Files unter lib/py*-linux-*/.
-        // Nur mit +x behandeln wenn's noch nicht gesetzt ist (spart Syscalls
-        // bei bereits gefixten Spielen).
-        var candidates = new System.Collections.Generic.List<string>();
-        try
-        {
-            candidates.AddRange(System.IO.Directory.EnumerateFiles(dir, "*.sh"));
-            var libDir = System.IO.Path.Combine(dir, "lib");
-            if (System.IO.Directory.Exists(libDir))
-            {
-                foreach (var pyDir in System.IO.Directory.EnumerateDirectories(libDir, "py*-linux-*"))
-                    candidates.AddRange(System.IO.Directory.EnumerateFiles(pyDir));
-            }
-        }
-        catch (Exception ex) { log.Debug(ex, "EnsureLinuxExec: Enumerate fehlgeschlagen: {Dir}", dir); return; }
-
-        const UnixFileMode ExecBits = UnixFileMode.UserExecute
-            | UnixFileMode.GroupExecute | UnixFileMode.OtherExecute;
-        int patched = 0;
-        foreach (var f in candidates)
-        {
-            try
-            {
-                var mode = System.IO.File.GetUnixFileMode(f);
-                if ((mode & UnixFileMode.UserExecute) != 0) continue; // schon ok
-                System.IO.File.SetUnixFileMode(f, mode | ExecBits);
-                patched++;
-            }
-            catch (Exception ex) { log.Debug(ex, "EnsureLinuxExec: chmod fehlgeschlagen: {File}", f); }
-        }
-        if (patched > 0) log.Info("EnsureLinuxExec: +x auf {N} Datei(en) gesetzt in {Dir}", patched, dir);
     }
 
     // ---- Tab-Contributions ----
