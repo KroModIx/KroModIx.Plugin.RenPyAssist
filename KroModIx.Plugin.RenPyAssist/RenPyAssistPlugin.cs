@@ -25,10 +25,10 @@ public sealed class RenPyAssistPlugin : IGameModPlugin, IUpdateNotifier, IGameLa
     public PluginMetadata Metadata { get; } = new(
         Id: "kroste.renpyassist",
         DisplayName: "Ren'Py Assist",
-        Version: "0.23.0",
+        Version: "0.25.0",
         Author: "Kroste",
         Description: "Verwaltet Ren'Py-Spiele als eigenständige Sidebar-Kacheln " +
-            "(Multi-Tile). v0.23.0: Exec-Bits beim Registrieren und nach jedem Update " +
+            "(Multi-Tile). v0.25.0: Exec-Bits beim Registrieren und nach jedem Update " +
             "statt erst beim Start; lib/linux-* (Ren'Py 7) wird jetzt mit erfasst. v0.22.0: OnGameAddedAsync implementiert — ein zur " +
             "Laufzeit hinzugefuegtes Spiel landet sofort in der Registry statt " +
             "erst nach dem naechsten App-Neustart. v0.16.2: Auto-Chmod vor Launch — setzt +x auf .sh + " +
