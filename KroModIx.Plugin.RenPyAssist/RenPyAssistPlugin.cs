@@ -25,10 +25,12 @@ public sealed class RenPyAssistPlugin : IGameModPlugin, IUpdateNotifier, IGameLa
     public PluginMetadata Metadata { get; } = new(
         Id: "kroste.renpyassist",
         DisplayName: "Ren'Py Assist",
-        Version: "0.28.0",
+        Version: "0.29.0",
         Author: "Kroste",
         Description: "Verwaltet Ren'Py-Spiele als eigenständige Sidebar-Kacheln " +
-            "(Multi-Tile). v0.28.0: „Spiel aus Archiv“ als globale Sidebar-Aktion " +
+            "(Multi-Tile). v0.29.0: Update-Ziel wird vor dem Schreiben bestimmt — " +
+            "In-Place-Archive (gleicher Ordnername) laufen nicht mehr in einen " +
+            "falschen Fehlschlag. v0.28.0: „Spiel aus Archiv“ als globale Sidebar-Aktion " +
             "statt im Tab eines fremden Spiels. v0.27.0: ImageSharp abgeloest — Cover-Konvertierung ueber " +
             "den Host-Decoder, Zuschnitt ueber Avalonia. v0.26.0: Spiel aus Archiv anlegen und Spiel loeschen " +
             "als Knoepfe in der Uebersicht. v0.25.0: Exec-Bits beim Registrieren und nach jedem Update " +

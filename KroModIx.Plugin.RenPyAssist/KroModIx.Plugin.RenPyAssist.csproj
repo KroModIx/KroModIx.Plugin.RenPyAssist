@@ -37,4 +37,9 @@
     <EmbeddedResource Include="Assets\krostemod_cheat.png" />
     <EmbeddedResource Include="Assets\krostemod_hint.png" />
   </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="KroModIx.Plugin.RenPyAssist.Tests" />
+  </ItemGroup>
+
 </Project>

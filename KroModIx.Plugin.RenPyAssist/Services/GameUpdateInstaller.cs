@@ -64,55 +64,78 @@ public sealed class GameUpdateInstaller
                 : Path.Combine(game.ContainerPath, oldSubPath, "game", "saves");
             var hadSaves = Directory.Exists(oldSavesDir);
 
-            // 1. Vor-Extract: welche Sub-Ordner gab's schon? (Diff nach
-            //    Extract = neuer Sub-Ordner.)
-            var subsBefore = Directory.EnumerateDirectories(game.ContainerPath)
-                .Select(Path.GetFileName)
-                .ToHashSet(StringComparer.OrdinalIgnoreCase);
-
-            // 2. Archiv entpacken.
+            // 1. Ziel VOR dem Entpacken bestimmen.
             //
-            // v0.21.0: ZIP, RAR und 7z statt nur ZIP. f95zone-Releases kommen
-            // in allen dreien; vorher scheiterte ein RAR-Download erst beim
-            // Entpacken mit einer Format-Exception.
-            // v0.23.0: ueber IHostServices.Archives statt SharpCompress im
-            // Plugin — und mit einer Meldung statt eines stillen
-            // Uebersprungs, siehe unten.
+            // v0.29.0: vorher wurde ausgepackt und danach per Verzeichnis-Diff
+            // gesucht, welcher Unterordner neu dazugekommen ist. Das scheitert,
+            // sobald das Archiv denselben Ordnernamen traegt wie die
+            // installierte Fassung — Entwickler benennen den Build-Ordner
+            // zwischen Versionen nicht immer um. Real: ein Archiv „…v0.3…zip"
+            // mit dem Ordner „THEPLEASURESOFEGYPT-0.2-win" darin, exakt der
+            // Name der installierten 0.2. Der Diff fand nichts Neues und
+            // meldete Fehlschlag — nachdem alle Dateien bereits ueber die
+            // laufende Fassung geschrieben waren.
             if (_archives.DetectKind(zipPath) == ArchiveKind.Unknown)
                 return InstallResult.Fail(
                     "Das ist kein lesbares Archiv (ZIP/RAR/7z) — eventuell ein "
                     + "abgebrochener Download.");
 
+            var ziel = UpdateTargetResolver.Resolve(_archives, zipPath, game.ContainerPath);
+            if (ziel is null)
+                return InstallResult.Fail(
+                    "Im Archiv ist kein game/-Ordner zu finden — das ist kein Ren'Py-Build. "
+                    + "Der alte Stand ist unangetastet.");
+
+            var newSubName = ziel.SubFolderName;
+            var newSubDir = Path.Combine(game.ContainerPath, newSubName);
+
+            // 2. Spielstaende sichern, BEVOR geschrieben wird.
+            //
+            // Beim In-Place-Fall schreibt das Archiv in genau den Ordner, in
+            // dem die Spielstaende liegen. Sie erst danach zu kopieren — so
+            // lief es bis v0.28 — kommt zu spaet, wenn das Archiv selbst ein
+            // game/saves mitbringt.
+            string? savesBackup = null;
+            if (hadSaves && ziel.IsInPlace)
+            {
+                savesBackup = Path.Combine(Path.GetTempPath(),
+                    "renpyassist-saves-" + Guid.NewGuid().ToString("N"));
+                try
+                {
+                    CopyDirectoryRecursive(oldSavesDir, savesBackup);
+                    if (!VerifySavesCopied(oldSavesDir, savesBackup))
+                        return InstallResult.Fail(
+                            "Die Spielstaende konnten vor dem Einbau nicht vollstaendig "
+                            + "gesichert werden — abgebrochen, der alte Stand ist unangetastet.");
+                    Log.Info("Saves vorab gesichert: {From} → {To}", oldSavesDir, savesBackup);
+                }
+                catch (Exception ex)
+                {
+                    Log.Error(ex, "Vorab-Sicherung der Saves fehlgeschlagen: {From}", oldSavesDir);
+                    return InstallResult.Fail(
+                        "Die Spielstaende konnten vor dem Einbau nicht gesichert werden ("
+                        + ex.Message + ") — abgebrochen, der alte Stand ist unangetastet.");
+                }
+            }
+
+            // 3. Archiv entpacken.
+            //
+            // v0.21.0: ZIP, RAR und 7z statt nur ZIP. f95zone-Releases kommen
+            // in allen dreien.
+            // v0.23.0: ueber IHostServices.Archives statt SharpCompress im Plugin.
             var abgelehnt = await Task.Run(() =>
             {
-                var entries = _archives.List(zipPath);
-                var topLevelDirs = entries
-                    .Select(e => e.Path.Split('/')[0])
-                    .Where(p => !string.IsNullOrEmpty(p))
-                    .Distinct(StringComparer.OrdinalIgnoreCase)
-                    .ToList();
-
-                // Flaches Archiv (game/ direkt) → wir wrappen in einen
-                // Sub-Ordner aus dem Archiv-Namen (ohne Extension).
-                var target = topLevelDirs.Contains("game", StringComparer.OrdinalIgnoreCase)
-                    ? Path.Combine(game.ContainerPath, Path.GetFileNameWithoutExtension(zipPath))
-                    : game.ContainerPath;
-                Directory.CreateDirectory(target);
-
-                var r = _archives.Extract(zipPath, target);
-                return r.SkippedUnsafe;
+                Directory.CreateDirectory(ziel.ExtractInto);
+                return _archives.Extract(zipPath, ziel.ExtractInto).SkippedUnsafe;
             }, ct).ConfigureAwait(false);
 
             // Ein Ausbruchsversuch beendet den Einbau hier, statt die Dateien
-            // zu nehmen die durchkamen. Vorher wurde der Eintrag nur
-            // protokolliert und der Einbau lief weiter — mit dem Ergebnis,
-            // dass die Schritte 3 bis 6 auf einem halb entpackten Stand
-            // arbeiteten und am Ende der alte Unterordner mit den
-            // Spielstaenden geloescht worden waere.
+            // zu nehmen die durchkamen.
             if (abgelehnt.Count > 0)
             {
                 Log.Warn("Ausbruchsversuch im Update-Archiv, {Count} Eintrag/Eintraege "
                     + "abgelehnt: {Entries}", abgelehnt.Count, string.Join(", ", abgelehnt));
+                TryRestoreSaves(savesBackup, oldSavesDir);
                 return InstallResult.Fail(
                     $"Abgebrochen: {abgelehnt.Count} Eintrag/Eintraege im Archiv wollten aus "
                     + "dem Spielordner herausschreiben — "
@@ -121,31 +144,47 @@ public sealed class GameUpdateInstaller
                     + ". Der alte Stand samt Spielstaenden ist unangetastet.");
             }
 
-            // 3. Neuen Sub-Ordner ermitteln (diff gegen subsBefore + game/-Marker).
-            var subsAfter = Directory.EnumerateDirectories(game.ContainerPath).ToList();
-            var newSubDir = subsAfter
-                .Where(d => !subsBefore.Contains(Path.GetFileName(d))
-                         && Directory.Exists(Path.Combine(d, "game")))
-                .OrderByDescending(d => Directory.GetCreationTimeUtc(d))
-                .FirstOrDefault();
+            if (!Directory.Exists(Path.Combine(newSubDir, "game")))
+            {
+                TryRestoreSaves(savesBackup, oldSavesDir);
+                return InstallResult.Fail(
+                    $"Nach dem Entpacken fehlt {newSubName}/game/ — das Archiv enthaelt "
+                    + "offenbar keinen vollstaendigen Ren'Py-Build.");
+            }
 
-            if (newSubDir is null)
-                return InstallResult.Fail("Nach dem Entpacken kein neuer Sub-Ordner mit game/ gefunden");
-
-            var newSubName = Path.GetFileName(newSubDir);
-
-            // 4. Save-Games kopieren.
+            // 4. Spielstaende an ihren Platz bringen.
             //
-            // v0.19.0: Das Ergebnis entscheidet, ob der alte Sub-Ordner in
-            // Schritt 6 geloescht werden darf. Vorher wurde ein
-            // fehlgeschlagener Copy nur geloggt und trotzdem weiter geloescht
-            // — bei voller Platte, gesperrter Datei oder Rechte-Problem waren
-            // die Spielstaende danach unwiederbringlich weg.
+            // Zwei Faelle, seit v0.29.0 unterschieden:
+            //   In-Place  — der Ordner ist derselbe. Die Saves liegen schon
+            //               richtig; nur falls das Archiv sie ueberschrieben
+            //               oder geloescht hat, kommt die Vorab-Sicherung
+            //               zurueck.
+            //   Neuer Ord.— vom alten in den neuen kopieren, wie bisher.
             bool savesSecured = !hadSaves;
             string? savesWarning = null;
-            if (hadSaves)
+            var newSavesDir = Path.Combine(newSubDir, "game", "saves");
+
+            if (hadSaves && ziel.IsInPlace)
             {
-                var newSavesDir = Path.Combine(newSubDir, "game", "saves");
+                // Hat das Archiv die Saves mitgebracht und damit ueberbuegelt,
+                // stellt die Vorab-Sicherung den alten Stand wieder her. Gibt
+                // es sie unveraendert, passiert nichts.
+                savesSecured = VerifySavesCopied(savesBackup!, newSavesDir);
+                if (!savesSecured)
+                {
+                    Log.Warn("Saves nach dem Einbau unvollstaendig — Vorab-Sicherung wird "
+                        + "zurueckgespielt: {From} → {To}", savesBackup, newSavesDir);
+                    savesSecured = TryRestoreSaves(savesBackup, newSavesDir);
+                    if (!savesSecured)
+                        savesWarning = string.Format(Strings.T("install.saves_backup_kept"), savesBackup);
+                }
+                else
+                {
+                    Log.Info("Saves unveraendert an Ort und Stelle: {Dir}", newSavesDir);
+                }
+            }
+            else if (hadSaves)
+            {
                 try
                 {
                     CopyDirectoryRecursive(oldSavesDir, newSavesDir);
@@ -233,7 +272,13 @@ public sealed class GameUpdateInstaller
             //    Problem. Der nächste Worker-Check holt frisch — falls wirklich
             //    ein noch neueres Update rauskommt, zeigt der Badge dann wieder.
             game.ActiveSubPath = newSubName;
-            game.LocalVersion = RenPyGameDetector.ExtractVersion(newSubName);
+            // v0.29.0: Faellt der Ordnername als Versionsquelle aus, zaehlt der
+            // Archivname. Beim In-Place-Fall traegt der Ordner die ALTE Version
+            // (Entwickler hat ihn nicht umbenannt) — uebernaehme man sie, bliebe
+            // der Update-Badge fuer immer stehen.
+            var ausOrdner = RenPyGameDetector.ExtractVersion(newSubName);
+            var ausArchiv = RenPyGameDetector.ExtractVersion(Path.GetFileName(zipPath));
+            game.LocalVersion = WähleVersion(ausOrdner, ausArchiv, game.LocalVersion);
 
             // v0.23.0: frisch entpackt heisst unter Linux fast immer „ohne
             // Exec-Bits" — ZIP transportiert keine Unix-Permissions. Hier
@@ -246,7 +291,12 @@ public sealed class GameUpdateInstaller
                 game.LastRemoteVersion = game.LocalVersion;
             _registry.Update(game);
 
-            return InstallResult.Ok(newSubName, oldSubPath, savesWarning);
+            // Die Vorab-Sicherung nur wegraeumen, wenn die Saves sicher am
+            // Platz sind. Sonst bleibt sie liegen und steht in der Warnung.
+            if (savesBackup is not null && savesSecured) TryDeleteDir(savesBackup);
+
+            return InstallResult.Ok(newSubName,
+                ziel.IsInPlace ? null : oldSubPath, savesWarning);
         }
         catch (Exception ex)
         {
@@ -255,6 +305,49 @@ public sealed class GameUpdateInstaller
         }
     }
 
+
+    /// <summary>Welche der beiden Versionsangaben gilt. Der Ordnername hat
+    /// Vorrang, solange er ueberhaupt eine traegt und sie nicht aelter ist als
+    /// die bisherige — sonst der Archivname.
+    ///
+    /// <para>Hintergrund: beim In-Place-Update traegt der Ordner die alte
+    /// Version, weil der Entwickler ihn nicht umbenannt hat. Uebernaehme man
+    /// sie, bliebe das Update-Badge nach einem erfolgreichen Einbau
+    /// stehen.</para></summary>
+    internal static string? WähleVersion(string? ausOrdner, string? ausArchiv, string? bisher)
+    {
+        if (string.IsNullOrWhiteSpace(ausOrdner)) return ausArchiv ?? bisher;
+        if (string.IsNullOrWhiteSpace(ausArchiv)) return ausOrdner;
+        // Beide da: die neuere gewinnt. VersionCompare kennt die Regeln
+        // (0.10 > 0.9, 1.0 == 1.0.0, Hotfix-Buchstaben).
+        return VersionCompare.IsRemoteNewer(ausArchiv, ausOrdner) ? ausArchiv : ausOrdner;
+    }
+
+    /// <summary>Spielt eine Vorab-Sicherung zurueck. true = Ziel ist danach
+    /// vollstaendig.</summary>
+    private static bool TryRestoreSaves(string? backupDir, string targetDir)
+    {
+        if (backupDir is null || !Directory.Exists(backupDir)) return false;
+        try
+        {
+            CopyDirectoryRecursive(backupDir, targetDir);
+            var ok = VerifySavesCopied(backupDir, targetDir);
+            if (ok) Log.Info("Saves zurueckgespielt: {From} → {To}", backupDir, targetDir);
+            else Log.Error("Rueckspielen unvollstaendig — Sicherung bleibt: {Dir}", backupDir);
+            return ok;
+        }
+        catch (Exception ex)
+        {
+            Log.Error(ex, "Rueckspielen der Saves fehlgeschlagen — Sicherung bleibt: {Dir}", backupDir);
+            return false;
+        }
+    }
+
+    private static void TryDeleteDir(string dir)
+    {
+        try { if (Directory.Exists(dir)) Directory.Delete(dir, recursive: true); }
+        catch (Exception ex) { Log.Debug(ex, "Temp-Sicherung nicht aufraeumbar: {Dir}", dir); }
+    }
 
     /// <summary>Zaehlt Dateien und Gesamtgroesse in Quelle und Ziel gegen.
     /// Ein Copy, der die Haelfte geschafft hat und dann abgebrochen ist,
