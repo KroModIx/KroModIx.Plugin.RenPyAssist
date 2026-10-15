@@ -382,7 +382,7 @@ public sealed class CoverCache
     {
         try
         {
-            using var img = Image.Load(source);
+            using var img = Image.Load(SafeImageConfiguration.Decoder, source);
             using var ms = new MemoryStream();
             img.Save(ms, new PngEncoder());
             return ms.ToArray();

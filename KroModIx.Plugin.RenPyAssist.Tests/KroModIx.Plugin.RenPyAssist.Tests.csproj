@@ -7,7 +7,7 @@
          behandeln, sonst kompiliert die Test-Assembly nicht mit
          TreatWarningsAsErrors=true aus Directory.Build.props. -->
     <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
-  </PropertyGroup>
+    </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="Microsoft.NET.Test.Sdk" />
     <PackageReference Include="xunit.v3" />

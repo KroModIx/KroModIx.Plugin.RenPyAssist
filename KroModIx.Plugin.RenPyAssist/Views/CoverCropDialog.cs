@@ -263,7 +263,8 @@ public sealed class CoverCropDialog : Window
             int cropW = Math.Min((int)_imgW - cropX, (int)(_selW * scale));
             int cropH = Math.Min((int)_imgH - cropY, (int)(_selH * scale));
 
-            using var img = SixLabors.ImageSharp.Image.Load(_sourceImagePath);
+            using var img = SixLabors.ImageSharp.Image.Load(
+                Services.SafeImageConfiguration.Decoder, _sourceImagePath);
             img.Mutate(x => x
                 .Crop(new SixLabors.ImageSharp.Rectangle(cropX, cropY, cropW, cropH))
                 .Resize(OutputWidth, OutputHeight));

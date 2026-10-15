@@ -2,7 +2,7 @@
   <ItemGroup>
     <!-- v1.18.0: IHostServices.Images (zentraler Bild-Decoder-Baukasten,
          WebP/AVIF/DDS-Fallbacks + Thread-Affinity). -->
-    <PackageVersion Include="KroModIx.Plugin.Contracts" Version="1.34.0" />
+    <PackageVersion Include="KroModIx.Plugin.Contracts" Version="1.35.0" />
     <!-- v0.23.0: Attrappen der Host-Baukaesten fuer das Testprojekt, aus
          demselben Tag wie die Contracts. -->
     <PackageVersion Include="KroModIx.Plugin.TestKit" Version="1.34.0" />
@@ -11,6 +11,26 @@
     <PackageVersion Include="MinVer" Version="7.0.0" />
     <!-- WebP-Decoder für ficsit-Cover: Avalonia/Skia versteht WebP nicht
          standardmäßig, ImageSharp konvertiert nach PNG (~2 MB Bundle-Größe). -->
+    <!-- Bleibt auf 3.x, mit begruendeter Unterdrueckung. Stand 15.10.2026
+         melden fuenf Advisories gegen ImageSharp <= 4.1.1; behoben sind alle
+         erst in 4.1.2, und ab 4.x verlangt Six Labors fuer RELEASE-Builds
+         eine kostenpflichtige Lizenz ("Release builds require a valid
+         license"). Fuer ein frei verteiltes Plugin keine Option — der
+         Release-Workflow bricht sofort ab. Keine 3.x-Version behebt etwas
+         davon.
+
+         Erreichbarkeit nachgemessen, nicht angenommen:
+           GHSA-j9gm-c75j-xc9q  hoch    TIFF-CCITT-T4-Encoder  -> kein Treffer fuer "Tiff" im Code
+           GHSA-jjfr-hcj7-qf5w  hoch    TIFF-CCITT-T6-Encoder  -> dito; gespeichert wird nur PNG
+           GHSA-j3p4-wp97-rph4  hoch    HistogramEqualization  -> nie aufgerufen; Mutate nutzt nur Crop/Resize
+           GHSA-wmxv-xphr-5c9g  mittel  BigTIFF-Decoder        -> Decoder nicht registriert, siehe SafeImageConfiguration
+           GHSA-gwg2-r3hj-4w44  mittel  ICC-CLUT-Parsing       -> BLEIBT erreichbar, jeder Decoder liest ICC
+
+         Die ICC-Luecke ist die offene Schuld. Der Ausweg ist nicht ein
+         Versionssprung, sondern ImageSharp hier ganz abzuloesen: gebraucht
+         werden nur Decode, Crop, Resize und PNG-Ausgabe — Decode kann
+         IHostServices.Images seit Host v1.18, der Rest geht ueber Avalonia.
+         Bis dahin gezielt diese Advisories unterdrueckt, nicht pauschal. -->
     <PackageVersion Include="SixLabors.ImageSharp" Version="3.1.12" />
     <!-- Python-Pickle fuer RPA-Index + Save-Files (v0.4+). -->
     <PackageVersion Include="Razorvine.Pickle" Version="1.5.0" />
@@ -23,4 +43,16 @@
     <PackageVersion Include="xunit.runner.visualstudio" Version="3.1.5" />
     <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="18.8.1" />
   </ItemGroup>
+
+  <!-- Gezielt pro Advisory, nicht pauschal per NoWarn: ein NEUER Fund gegen
+       irgendein Paket bricht den Build weiterhin. Begruendung je Eintrag
+       siehe Kommentar bei der ImageSharp-Version oben. -->
+  <ItemGroup>
+    <NuGetAuditSuppress Include="https://github.com/advisories/GHSA-j9gm-c75j-xc9q" /><!-- TIFF-T4-Encoder, nicht benutzt -->
+    <NuGetAuditSuppress Include="https://github.com/advisories/GHSA-jjfr-hcj7-qf5w" /><!-- TIFF-T6-Encoder, nicht benutzt -->
+    <NuGetAuditSuppress Include="https://github.com/advisories/GHSA-j3p4-wp97-rph4" /><!-- HistogramEqualization, nie aufgerufen -->
+    <NuGetAuditSuppress Include="https://github.com/advisories/GHSA-wmxv-xphr-5c9g" /><!-- BigTIFF-Decoder, nicht registriert -->
+    <NuGetAuditSuppress Include="https://github.com/advisories/GHSA-gwg2-r3hj-4w44" /><!-- ICC-CLUT: bleibt erreichbar, offene Schuld -->
+  </ItemGroup>
+
 </Project>

@@ -244,6 +244,47 @@ public sealed class RenPyGameView : UserControl
         noThreadHint.Bind(TextBlock.IsVisibleProperty, new Binding(nameof(RenPyGameViewModel.HasThread))
         { Converter = new Avalonia.Data.Converters.FuncValueConverter<bool, bool>(v => !v) });
 
+        // --- Spiel-Verwaltung (v0.26.0): anlegen und loeschen.
+        //     Ganz unten und optisch zurueckhaltend — das sind die beiden
+        //     seltensten Aktionen der Uebersicht, und eine davon ist
+        //     unwiderruflich. Der Anlegen-Knopf haengt nicht am gezeigten
+        //     Spiel: er legt ein NEUES an, steht hier aber, weil es keinen
+        //     spiel-unabhaengigen Ort im Plugin gibt. ---
+        var neuesSpielBtn = new Button { Content = Strings.T("btn.new_game") };
+        neuesSpielBtn.Classes.Add("ghost");
+        neuesSpielBtn.Bind(Button.CommandProperty,
+            new Binding(nameof(RenPyGameViewModel.NewGameFromArchiveCommand)));
+
+        var loeschenBtn = new Button { Content = Strings.T("btn.delete_game") };
+        loeschenBtn.Classes.Add("ghost");
+        loeschenBtn.Bind(Button.CommandProperty,
+            new Binding(nameof(RenPyGameViewModel.DeleteGameCommand)));
+
+        var gameActionStatus = new TextBlock
+        {
+            HorizontalAlignment = HorizontalAlignment.Center,
+            Margin = new Thickness(0, 8, 0, 0),
+            TextWrapping = TextWrapping.Wrap,
+        };
+        gameActionStatus.Classes.Add("muted");
+        gameActionStatus.Bind(TextBlock.TextProperty,
+            new Binding(nameof(RenPyGameViewModel.GameActionStatus)));
+        gameActionStatus.Bind(TextBlock.IsVisibleProperty,
+            new Binding(nameof(RenPyGameViewModel.GameActionStatus))
+            {
+                Converter = new Avalonia.Data.Converters.FuncValueConverter<string, bool>(
+                    v => !string.IsNullOrWhiteSpace(v)),
+            });
+
+        var gameActions = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            HorizontalAlignment = HorizontalAlignment.Center,
+            Spacing = 10,
+            Margin = new Thickness(0, 28, 0, 0),
+            Children = { neuesSpielBtn, loeschenBtn },
+        };
+
         // --- Layout: zentrierter StackPanel im ScrollViewer ---
         var stack = new StackPanel
         {
@@ -256,6 +297,7 @@ public sealed class RenPyGameView : UserControl
                 descHeader, descText, translationHint,
                 genreHeader, genrePanel,
                 noThreadHint,
+                gameActions, gameActionStatus,
             },
         };
 
