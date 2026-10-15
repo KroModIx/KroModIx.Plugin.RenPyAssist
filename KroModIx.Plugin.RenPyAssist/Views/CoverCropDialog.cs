@@ -9,9 +9,6 @@ using Avalonia.Media;
 using Avalonia.Media.Imaging;
 using KroModIx.Plugin.Contracts;
 using KroModIx.Plugin.RenPyAssist.Services;
-using SixLabors.ImageSharp;
-using SixLabors.ImageSharp.Formats.Png;
-using SixLabors.ImageSharp.Processing;
 
 namespace KroModIx.Plugin.RenPyAssist.Views;
 
@@ -20,7 +17,8 @@ namespace KroModIx.Plugin.RenPyAssist.Views;
 ///
 /// <para>Bedienung: das Auswahl-Rechteck ist per Maus verschiebbar
 /// (PointerPressed + Drag). Zoom-Slider bestimmt die Größe. „💾 Speichern"
-/// schneidet das Original per ImageSharp und speichert als PNG. Callback
+/// schneidet das Original per Avalonia-RenderTargetBitmap und speichert als
+/// PNG. Callback
 /// <see cref="OnCropSaved"/> bekommt den fertigen Pfad.</para></summary>
 public sealed class CoverCropDialog : Window
 {
@@ -40,6 +38,12 @@ public sealed class CoverCropDialog : Window
     private readonly Canvas _canvas;
 
     private double _imgW, _imgH; // original image px
+
+    /// <summary>Die dekodierte Quelle. Kommt aus dem Host-Decoder und wird
+    /// beim Speichern wiederverwendet — vorher las ImageSharp die Datei ein
+    /// zweites Mal und konnte dabei Formate nicht, die der Host längst
+    /// beherrscht (AVIF etwa).</summary>
+    private Bitmap? _sourceBitmap;
     private double _dispW, _dispH; // displayed image px in Canvas
     private double _dispOffsetX, _dispOffsetY;
 
@@ -161,6 +165,7 @@ public sealed class CoverCropDialog : Window
             var bmp = await _host.Images.DecodeFileAsync(_sourceImagePath);
             if (bmp is null) throw new InvalidOperationException("decode failed");
             _preview.Source = bmp;
+            _sourceBitmap = bmp;
             _imgW = bmp.PixelSize.Width;
             _imgH = bmp.PixelSize.Height;
 
@@ -263,15 +268,36 @@ public sealed class CoverCropDialog : Window
             int cropW = Math.Min((int)_imgW - cropX, (int)(_selW * scale));
             int cropH = Math.Min((int)_imgH - cropY, (int)(_selH * scale));
 
-            using var img = SixLabors.ImageSharp.Image.Load(
-                Services.SafeImageConfiguration.Decoder, _sourceImagePath);
-            img.Mutate(x => x
-                .Crop(new SixLabors.ImageSharp.Rectangle(cropX, cropY, cropW, cropH))
-                .Resize(OutputWidth, OutputHeight));
+            if (_sourceBitmap is null)
+            {
+                _statusText.Text = string.Format(
+                    Strings.T("crop.status_save_fail"), Strings.T("crop.no_image"));
+                return;
+            }
+            if (cropW <= 0 || cropH <= 0)
+            {
+                _statusText.Text = string.Format(
+                    Strings.T("crop.status_save_fail"), Strings.T("crop.empty_selection"));
+                return;
+            }
 
+            // v0.27.0: Zuschnitt über Avalonia statt ImageSharp. DrawImage mit
+            // Quell- und Zielrechteck macht Crop und Skalierung in einem
+            // Schritt, und RenderTargetBitmap.Save schreibt PNG. Läuft auf dem
+            // UI-Thread — hier ohnehin der Fall, der Dialog ruft aus einem
+            // Button-Handler.
             Directory.CreateDirectory(System.IO.Path.GetDirectoryName(_outputPath)!);
-            using (var fs = File.Create(_outputPath))
-                img.Save(fs, new PngEncoder());
+            using (var ziel = new RenderTargetBitmap(new PixelSize(OutputWidth, OutputHeight)))
+            {
+                using (var ctx = ziel.CreateDrawingContext())
+                {
+                    ctx.DrawImage(_sourceBitmap,
+                        new Rect(cropX, cropY, cropW, cropH),
+                        new Rect(0, 0, OutputWidth, OutputHeight));
+                }
+                // PngBitmapEncoderOptions: explizit PNG, nicht am Dateinamen geraten.
+                ziel.Save(_outputPath, new PngBitmapEncoderOptions());
+            }
 
             OnCropSaved?.Invoke(_outputPath);
             Close();

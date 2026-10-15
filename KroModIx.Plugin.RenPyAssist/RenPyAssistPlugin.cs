@@ -25,10 +25,11 @@ public sealed class RenPyAssistPlugin : IGameModPlugin, IUpdateNotifier, IGameLa
     public PluginMetadata Metadata { get; } = new(
         Id: "kroste.renpyassist",
         DisplayName: "Ren'Py Assist",
-        Version: "0.26.0",
+        Version: "0.27.0",
         Author: "Kroste",
         Description: "Verwaltet Ren'Py-Spiele als eigenständige Sidebar-Kacheln " +
-            "(Multi-Tile). v0.26.0: Spiel aus Archiv anlegen und Spiel loeschen " +
+            "(Multi-Tile). v0.27.0: ImageSharp abgeloest — Cover-Konvertierung ueber " +
+            "den Host-Decoder, Zuschnitt ueber Avalonia. v0.26.0: Spiel aus Archiv anlegen und Spiel loeschen " +
             "als Knoepfe in der Uebersicht. v0.25.0: Exec-Bits beim Registrieren und nach jedem Update " +
             "statt erst beim Start; lib/linux-* (Ren'Py 7) wird jetzt mit erfasst. v0.22.0: OnGameAddedAsync implementiert — ein zur " +
             "Laufzeit hinzugefuegtes Spiel landet sofort in der Registry statt " +
@@ -97,7 +98,7 @@ public sealed class RenPyAssistPlugin : IGameModPlugin, IUpdateNotifier, IGameLa
         _registry = new GamesRegistry(_paths);
         _f95 = new F95zoneClient(host);
         _sessionStore = new F95zoneSessionStore(_paths.F95zoneCookiesPath, host.Secrets);
-        _covers = new CoverCache(_paths.CoverCacheDir, _f95);
+        _covers = new CoverCache(_paths.CoverCacheDir, _f95, host.Images);
         _worker = new RenPyWorker(_registry, _f95, _settings, _covers, host);
         _downloadWatcher = new DownloadWatcher();
         _installer = new GameUpdateInstaller(_registry, host.Archives);

@@ -4,9 +4,10 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
+using Avalonia.Media.Imaging;
 using NLog;
-using SixLabors.ImageSharp;
-using SixLabors.ImageSharp.Formats.Png;
+
+using KroModIx.Plugin.Contracts;
 
 namespace KroModIx.Plugin.RenPyAssist.Services;
 
@@ -17,7 +18,7 @@ namespace KroModIx.Plugin.RenPyAssist.Services;
 ///
 /// <para><b>AVIF/WebP:</b> F95zones imgproxy transkodiert Original-PNGs zu
 /// AVIF. Avaloia/Skia versteht AVIF nicht — deshalb konvertieren wir via
-/// SixLabors.ImageSharp zu PNG bevor wir cachen. Vorteil gegenüber ffmpeg
+/// den Host-Decoder zu PNG bevor wir cachen. Vorteil gegenüber ffmpeg
 /// (RenPack-Ansatz): kein externer Prozess, keine PATH-Abhängigkeit,
 /// funktioniert im AppImage.</para>
 ///
@@ -38,12 +39,19 @@ public sealed class CoverCache
     // auf dieselbe Task-Instanz. Nach Completion aus dem Dict raus.
     private readonly System.Collections.Concurrent.ConcurrentDictionary<string, Task<string?>> _inFlight = new();
 
-    public CoverCache(string cacheDir, F95zoneClient client)
+    /// <summary>v0.27.0: <paramref name="images"/> ist der Host-Decoder. Er
+    /// ersetzt die ImageSharp-Konvertierung und kann mehr als sie — AVIF
+    /// etwa, das ImageSharp 3.x gar nicht liest und wofür hier bisher
+    /// ffmpeg einspringen musste.</summary>
+    public CoverCache(string cacheDir, F95zoneClient client, IImageDecoder images)
     {
         _cacheDir = cacheDir;
         _client = client;
+        _images = images;
         Directory.CreateDirectory(_cacheDir);
     }
+
+    private readonly IImageDecoder _images;
 
     public string PathFor(string coverUrl) =>
         Path.Combine(_cacheDir, HashUrl(coverUrl) + ".img");
@@ -233,17 +241,16 @@ public sealed class CoverCache
         }
 
         // AVIF/WebP → PNG. F95zone imgproxy transkodiert alle Cover zu
-        // AVIF egal welche URL-Extension. ImageSharp 3.x kann kein AVIF
-        // (4.x ist kommerziell). Fallback-Kaskade:
-        //   1) ImageSharp (WebP, ggf. PNG/JPEG-Recode)
-        //   2) ffmpeg via Process (AVIF-Standard-Fallback, Linux idR da)
+        // AVIF egal welche URL-Extension. Fallback-Kaskade:
+        //   1) Host-Decoder (IImageDecoder, kann AVIF/WebP/DDS)
+        //   2) ffmpeg via Process (falls der Host-Decoder passt)
         // Wenn beide fehlschlagen: null zurückgeben (kein Cache-Eintrag).
         if (IsAvif(bytes) || IsWebp(bytes))
         {
-            var converted = TryConvertToPng(bytes);
+            var converted = await TryConvertToPngAsync(bytes, ct).ConfigureAwait(false);
             if (converted is null && IsAvif(bytes))
             {
-                Log.Debug("ImageSharp konnte AVIF nicht dekodieren, versuche ffmpeg-Fallback");
+                Log.Debug("Host-Decoder konnte das Cover nicht lesen, versuche ffmpeg-Fallback");
                 converted = await TryConvertWithFfmpegAsync(bytes, ".avif", ct);
             }
             if (converted is not null)
@@ -308,7 +315,7 @@ public sealed class CoverCache
     }
 
     /// <summary>Konvertiert Bild-Bytes zu PNG via ffmpeg (falls installiert).
-    /// Nutze das für AVIF (ImageSharp 3.x kann kein AVIF, 4.x ist kommerziell)
+    /// Zweite Instanz für den Fall, dass auch der Host-Decoder passt
     /// und für animierte GIFs (Avalonia's Bitmap-Ctor kann keine großen GIFs).
     /// Bei GIF wird nur das erste Frame extrahiert (<c>-vframes 1</c>).
     /// Umweg über zwei Temp-Files statt stdin/stdout-Pipe: bei letzterer
@@ -378,18 +385,32 @@ public sealed class CoverCache
         }
     }
 
-    private static byte[]? TryConvertToPng(byte[] source)
+    /// <summary>Wandelt beliebige Bild-Bytes nach PNG — über den
+    /// Host-Decoder und Avalonias PNG-Ausgabe.
+    ///
+    /// <para>Vorher lief das über ImageSharp. Das konnte kein AVIF (erst die
+    /// kommerzielle 4.x), und genau AVIF liefert f95zones imgproxy für alle
+    /// Cover; der ffmpeg-Fallback darunter musste deshalb regelmäßig ran.
+    /// Der Host-Decoder beherrscht PNG/JPEG/BMP/GIF/WebP/AVIF/DDS an einer
+    /// Stelle für alle Plugins — damit ist ImageSharp hier überflüssig
+    /// geworden.</para>
+    ///
+    /// <para><c>Bitmap.Save</c> schreibt PNG. Die Bitmap-Instanziierung legt
+    /// der Host selbst auf den UI-Thread (Skia hat dafür Thread-Affinität);
+    /// das Speichern einer fertigen Bitmap ist davon nicht betroffen.</para></summary>
+    private async Task<byte[]?> TryConvertToPngAsync(byte[] source, CancellationToken ct)
     {
         try
         {
-            using var img = Image.Load(SafeImageConfiguration.Decoder, source);
+            using var bmp = await _images.DecodeAsync(source, ct).ConfigureAwait(false);
+            if (bmp is null) return null;
             using var ms = new MemoryStream();
-            img.Save(ms, new PngEncoder());
+            bmp.Save(ms, new PngBitmapEncoderOptions());
             return ms.ToArray();
         }
         catch (Exception ex)
         {
-            Log.Debug(ex, "ImageSharp-Convert fehlgeschlagen — Original wird durchgereicht");
+            Log.Debug(ex, "Host-Decode fehlgeschlagen — ffmpeg-Fallback übernimmt");
             return null;
         }
     }
