@@ -43,17 +43,11 @@ public sealed partial class RenPyGameViewModel : ObservableObject, IDisposable
     /// Datei-Auswahl, Fehler) — direkt unter dem Badge sichtbar.</summary>
     [ObservableProperty] private string _updateStatus = "";
 
-    private readonly GameInstallService _installer;
-    /// <summary>Startverzeichnis der Archiv-Auswahl — der Watch-Ordner aus den
-    /// Plugin-Einstellungen. Null ist in Ordnung, dann oeffnet der Dialog dort,
-    /// wo das Betriebssystem meint.</summary>
-    private readonly string? _downloadsDir;
     private readonly GameUninstallService _uninstaller;
 
-    /// <summary>Laeuft gerade ein Anlegen oder Loeschen? Blockt beide Knoepfe,
-    /// damit ein zweiter Klick nicht mitten in ein rekursives Delete faellt.</summary>
+    /// <summary>Laeuft gerade ein Loeschen? Blockt den Knopf, damit ein
+    /// zweiter Klick nicht mitten in ein rekursives Delete faellt.</summary>
     [ObservableProperty]
-    [NotifyCanExecuteChangedFor(nameof(NewGameFromArchiveCommand))]
     [NotifyCanExecuteChangedFor(nameof(DeleteGameCommand))]
     private bool _isBusyWithGame;
 
@@ -64,12 +58,9 @@ public sealed partial class RenPyGameViewModel : ObservableObject, IDisposable
 
     public RenPyGameViewModel(RenPyGame game, GamesRegistry registry,
         CoverCache covers, AiTranslator translator, GameUpdateFlow updateFlow,
-        IHostServices host, GameInstallService installer,
-        GameUninstallService uninstaller, string? downloadsDir)
+        IHostServices host, GameUninstallService uninstaller)
     {
-        _installer = installer;
         _uninstaller = uninstaller;
-        _downloadsDir = downloadsDir;
         _game = game;
         _registry = registry;
         _covers = covers;
@@ -153,88 +144,6 @@ public sealed partial class RenPyGameViewModel : ObservableObject, IDisposable
     }
 
     private bool CanActOnGame() => !IsBusyWithGame;
-
-    /// <summary>v0.26.0: Neues Spiel aus einem Archiv im Downloads-Ordner.
-    ///
-    /// <para>Der Weg vorher war: Ordnerstruktur von Hand anlegen, Archiv
-    /// hineinkopieren, auspacken, den Host-Wizard suchen lassen, dann den
-    /// Thread nachtragen. Hier ist es ein Dateidialog, ein Name und
-    /// optional der Thread.</para></summary>
-    [RelayCommand(CanExecute = nameof(CanActOnGame))]
-    private async Task NewGameFromArchiveAsync()
-    {
-        if (IsBusyWithGame) return;
-
-        // Der Spiele-Ordner wird aus den vorhandenen Containern abgeleitet —
-        // es gibt keine Einstellung dafuer, die verlaesslich gefuellt waere.
-        var root = GameInstallService.GuessGamesRoot(_registry.Games);
-        if (root is null)
-        {
-            await _host.Dialogs.ShowMessageAsync(
-                Strings.T("dialog.no_games_root"), Strings.T("dialog.no_games_root_msg"));
-            return;
-        }
-
-        var archiv = await _host.Dialogs.PickFileInAsync(
-            Strings.T("dialog.pick_archive"), _downloadsDir,
-            ("Archiv", new[] { "*.zip", "*.rar", "*.7z" }));
-        if (string.IsNullOrWhiteSpace(archiv)) return;
-
-        if (!_installer.LooksLikeRenPyGame(archiv!))
-        {
-            await _host.Dialogs.ShowMessageAsync(
-                Strings.T("dialog.not_renpy"), Strings.T("dialog.not_renpy_msg"));
-            return;
-        }
-
-        // Name aus dem Build-Ordner im Archiv, sonst aus dem Dateinamen — der
-        // Build-Ordner ist der genauere Ausgangspunkt.
-        var quelle = _installer.DetectBuildFolder(archiv!) ?? archiv!;
-        var vorschlag = ArchiveNameParser.SuggestName(quelle);
-
-        var wunsch = await NewGameDialog.PromptAsync(archiv!, root, vorschlag);
-        if (wunsch is null) return;
-
-        try
-        {
-            IsBusyWithGame = true;
-            GameActionStatus = string.Format(Strings.T("dialog.new_game_running"), wunsch.DisplayName);
-
-            var res = await _installer.InstallAsync(wunsch.ArchivePath, root, wunsch.DisplayName);
-            if (!res.Success || res.ContainerPath is null)
-            {
-                await _host.Dialogs.ShowMessageAsync(
-                    Strings.T("dialog.new_game_fail"), res.Error ?? "");
-                return;
-            }
-
-            // Registry zuerst: dann traegt die Kachel ab der ersten Sekunde
-            // Version und Thread, statt sie beim naechsten Scan nachzuziehen.
-            var eintrag = _registry.EnsureFromContainer(res.ContainerPath);
-            if (!string.IsNullOrWhiteSpace(wunsch.ThreadUrl))
-            {
-                eintrag.ThreadUrl = wunsch.ThreadUrl;
-                _registry.Update(eintrag);
-            }
-
-            // Erst jetzt beim Host anmelden. Der legt die Kachel an und meldet
-            // das Spiel per OnGameAddedAsync zurueck — die Registry steht da
-            // schon, der Rueckruf findet also einen vollstaendigen Eintrag.
-            if (!_host.TryAddManualGame(wunsch.DisplayName, res.ContainerPath, "renpy"))
-                _host.Logger.Warn("Kachel fuer {Name} konnte nicht angelegt werden "
-                    + "(Host < v1.35 oder Pfad schon belegt)", wunsch.DisplayName);
-
-            _host.Notifications.Notify(
-                string.Format(Strings.T("dialog.new_game_done"), wunsch.DisplayName),
-                NotificationLevel.Success);
-        }
-        catch (Exception ex)
-        {
-            _host.Logger.Warn(ex, "Neues Spiel anlegen fehlgeschlagen");
-            await _host.Dialogs.ShowMessageAsync(Strings.T("dialog.new_game_fail"), ex.Message);
-        }
-        finally { IsBusyWithGame = false; GameActionStatus = ""; }
-    }
 
     /// <summary>v0.26.0: Spiel loeschen — Platte und Kachel.
     ///

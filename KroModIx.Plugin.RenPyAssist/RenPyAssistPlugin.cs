@@ -25,10 +25,11 @@ public sealed class RenPyAssistPlugin : IGameModPlugin, IUpdateNotifier, IGameLa
     public PluginMetadata Metadata { get; } = new(
         Id: "kroste.renpyassist",
         DisplayName: "Ren'Py Assist",
-        Version: "0.27.0",
+        Version: "0.28.0",
         Author: "Kroste",
         Description: "Verwaltet Ren'Py-Spiele als eigenständige Sidebar-Kacheln " +
-            "(Multi-Tile). v0.27.0: ImageSharp abgeloest — Cover-Konvertierung ueber " +
+            "(Multi-Tile). v0.28.0: „Spiel aus Archiv“ als globale Sidebar-Aktion " +
+            "statt im Tab eines fremden Spiels. v0.27.0: ImageSharp abgeloest — Cover-Konvertierung ueber " +
             "den Host-Decoder, Zuschnitt ueber Avalonia. v0.26.0: Spiel aus Archiv anlegen und Spiel loeschen " +
             "als Knoepfe in der Uebersicht. v0.25.0: Exec-Bits beim Registrieren und nach jedem Update " +
             "statt erst beim Start; lib/linux-* (Ren'Py 7) wird jetzt mit erfasst. v0.22.0: OnGameAddedAsync implementiert — ein zur " +
@@ -87,6 +88,7 @@ public sealed class RenPyAssistPlugin : IGameModPlugin, IUpdateNotifier, IGameLa
     // v0.26.0: Spiel aus Archiv anlegen / Spiel loeschen
     private GameInstallService? _gameInstaller;
     private GameUninstallService? _gameUninstaller;
+    private NewGameFlow? _newGameFlow;
     private IReadOnlyList<DetectedGame> _activatedGames = Array.Empty<DetectedGame>();
 
     public Task InitializeAsync(IHostServices host, IReadOnlyList<DetectedGame> activatedGames, CancellationToken ct)
@@ -111,6 +113,7 @@ public sealed class RenPyAssistPlugin : IGameModPlugin, IUpdateNotifier, IGameLa
         _rpycBatch = new RpycBatchService();
         _gameInstaller = new GameInstallService(host.Archives);
         _gameUninstaller = new GameUninstallService(_registry);
+        _newGameFlow = new NewGameFlow(_gameInstaller, _registry, _settings, host);
         _activatedGames = activatedGames;
 
         var cookieBlob = _sessionStore.Load();
@@ -290,6 +293,20 @@ public sealed class RenPyAssistPlugin : IGameModPlugin, IUpdateNotifier, IGameLa
         }
     }
 
+    /// <summary>v0.28.0: „Spiel aus Archiv" haengt an keinem Spiel mehr.
+    ///
+    /// <para>Bis v0.27 sass der Knopf in der Uebersicht irgendeines anderen
+    /// Spiels, weil der Contract nur spielgebundene Tabs kannte — man
+    /// brauchte also ein Spiel, um ein Spiel anzulegen. Host v1.36 bietet
+    /// mit <see cref="IGlobalAction"/> den richtigen Platz dafuer, und
+    /// <c>activateWithoutGame</c> im Manifest sorgt dafuer, dass das Plugin
+    /// auch ohne Ren'Py-Kachel geladen wird.</para></summary>
+    public IEnumerable<IGlobalAction> GetGlobalActions()
+    {
+        if (_newGameFlow is null || _registry is null) yield break;
+        yield return new NewGameAction(_newGameFlow, _registry);
+    }
+
     public IEnumerable<IGameTabContribution> GetTabContributions(DetectedGame game)
     {
         if (_host is null || _settings is null || _registry is null
@@ -301,7 +318,7 @@ public sealed class RenPyAssistPlugin : IGameModPlugin, IUpdateNotifier, IGameLa
             yield break;
 
         yield return new GameDetailTab(_registry, _covers, _translator, _updateFlow, _host,
-            _gameInstaller, _gameUninstaller, () => _settings?.Current.DownloadsWatchDir);
+            _gameUninstaller);
         yield return new ArchivesTab(_rpaService, _previewService, _registry, _host);
         yield return new SavesTab(_saveService, _registry, _host);
         yield return new ModsTab(_modBuilder, _rpycBatch, _registry, _host);
@@ -499,19 +516,15 @@ public sealed class RenPyAssistPlugin : IGameModPlugin, IUpdateNotifier, IGameLa
         private readonly AiTranslator _translator;
         private readonly GameUpdateFlow _updateFlow;
         private readonly IHostServices _host;
-        private readonly GameInstallService _installer;
         private readonly GameUninstallService _uninstaller;
-        private readonly Func<string?> _downloadsDir;
 
         public GameDetailTab(GamesRegistry registry, CoverCache covers,
             AiTranslator translator, GameUpdateFlow updateFlow, IHostServices host,
-            GameInstallService installer, GameUninstallService uninstaller,
-            Func<string?> downloadsDir)
+            GameUninstallService uninstaller)
         {
             _registry = registry; _covers = covers;
             _translator = translator; _updateFlow = updateFlow; _host = host;
-            _installer = installer; _uninstaller = uninstaller;
-            _downloadsDir = downloadsDir;
+            _uninstaller = uninstaller;
         }
 
         public string Id => "game";
@@ -526,7 +539,7 @@ public sealed class RenPyAssistPlugin : IGameModPlugin, IUpdateNotifier, IGameLa
             return new RenPyGameView
             {
                 DataContext = new RenPyGameViewModel(entry, _registry, _covers, _translator,
-                    _updateFlow, _host, _installer, _uninstaller, _downloadsDir()),
+                    _updateFlow, _host, _uninstaller),
             };
         }
     }

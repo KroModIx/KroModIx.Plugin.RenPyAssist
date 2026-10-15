@@ -244,17 +244,12 @@ public sealed class RenPyGameView : UserControl
         noThreadHint.Bind(TextBlock.IsVisibleProperty, new Binding(nameof(RenPyGameViewModel.HasThread))
         { Converter = new Avalonia.Data.Converters.FuncValueConverter<bool, bool>(v => !v) });
 
-        // --- Spiel-Verwaltung (v0.26.0): anlegen und loeschen.
-        //     Ganz unten und optisch zurueckhaltend — das sind die beiden
-        //     seltensten Aktionen der Uebersicht, und eine davon ist
-        //     unwiderruflich. Der Anlegen-Knopf haengt nicht am gezeigten
-        //     Spiel: er legt ein NEUES an, steht hier aber, weil es keinen
-        //     spiel-unabhaengigen Ort im Plugin gibt. ---
-        var neuesSpielBtn = new Button { Content = Strings.T("btn.new_game") };
-        neuesSpielBtn.Classes.Add("ghost");
-        neuesSpielBtn.Bind(Button.CommandProperty,
-            new Binding(nameof(RenPyGameViewModel.NewGameFromArchiveCommand)));
-
+        // --- Spiel loeschen (v0.26.0). Ganz unten und optisch
+        //     zurueckhaltend: seltenste Aktion der Uebersicht, und
+        //     unwiderruflich.
+        //     v0.28.0: „Spiel aus Archiv" ist hier ausgezogen — das haengt an
+        //     keinem Spiel und sitzt jetzt als globale Aktion in der Sidebar
+        //     (Host v1.36). ---
         var loeschenBtn = new Button { Content = Strings.T("btn.delete_game") };
         loeschenBtn.Classes.Add("ghost");
         loeschenBtn.Bind(Button.CommandProperty,
@@ -282,7 +277,7 @@ public sealed class RenPyGameView : UserControl
             HorizontalAlignment = HorizontalAlignment.Center,
             Spacing = 10,
             Margin = new Thickness(0, 28, 0, 0),
-            Children = { neuesSpielBtn, loeschenBtn },
+            Children = { loeschenBtn },
         };
 
         // --- Layout: zentrierter StackPanel im ScrollViewer ---
