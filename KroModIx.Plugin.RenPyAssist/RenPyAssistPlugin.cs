@@ -25,10 +25,11 @@ public sealed class RenPyAssistPlugin : IGameModPlugin, IUpdateNotifier, IGameLa
     public PluginMetadata Metadata { get; } = new(
         Id: "kroste.renpyassist",
         DisplayName: "Ren'Py Assist",
-        Version: "0.29.0",
+        Version: "0.30.0",
         Author: "Kroste",
         Description: "Verwaltet Ren'Py-Spiele als eigenständige Sidebar-Kacheln " +
-            "(Multi-Tile). v0.29.0: Update-Ziel wird vor dem Schreiben bestimmt — " +
+            "(Multi-Tile). v0.30.0: Windows-only-Builds bekommen die fehlende " +
+            "Linux-Runtime aus dem Ren'Py-SDK und laufen nativ. v0.29.0: Update-Ziel wird vor dem Schreiben bestimmt — " +
             "In-Place-Archive (gleicher Ordnername) laufen nicht mehr in einen " +
             "falschen Fehlschlag. v0.28.0: „Spiel aus Archiv“ als globale Sidebar-Aktion " +
             "statt im Tab eines fremden Spiels. v0.27.0: ImageSharp abgeloest — Cover-Konvertierung ueber " +
@@ -91,6 +92,7 @@ public sealed class RenPyAssistPlugin : IGameModPlugin, IUpdateNotifier, IGameLa
     private GameInstallService? _gameInstaller;
     private GameUninstallService? _gameUninstaller;
     private NewGameFlow? _newGameFlow;
+    private LinuxRuntimeInstaller? _linuxRuntime;
     private IReadOnlyList<DetectedGame> _activatedGames = Array.Empty<DetectedGame>();
 
     public Task InitializeAsync(IHostServices host, IReadOnlyList<DetectedGame> activatedGames, CancellationToken ct)
@@ -115,7 +117,8 @@ public sealed class RenPyAssistPlugin : IGameModPlugin, IUpdateNotifier, IGameLa
         _rpycBatch = new RpycBatchService();
         _gameInstaller = new GameInstallService(host.Archives);
         _gameUninstaller = new GameUninstallService(_registry);
-        _newGameFlow = new NewGameFlow(_gameInstaller, _registry, _settings, host);
+        _linuxRuntime = new LinuxRuntimeInstaller(host, _paths.PluginCacheDir);
+        _newGameFlow = new NewGameFlow(_gameInstaller, _registry, _settings, host, _linuxRuntime);
         _activatedGames = activatedGames;
 
         var cookieBlob = _sessionStore.Load();
@@ -305,8 +308,10 @@ public sealed class RenPyAssistPlugin : IGameModPlugin, IUpdateNotifier, IGameLa
     /// auch ohne Ren'Py-Kachel geladen wird.</para></summary>
     public IEnumerable<IGlobalAction> GetGlobalActions()
     {
-        if (_newGameFlow is null || _registry is null) yield break;
+        if (_newGameFlow is null || _registry is null || _linuxRuntime is null || _host is null)
+            yield break;
         yield return new NewGameAction(_newGameFlow, _registry);
+        yield return new FixRuntimeAction(_registry, _linuxRuntime, _host);
     }
 
     public IEnumerable<IGameTabContribution> GetTabContributions(DetectedGame game)

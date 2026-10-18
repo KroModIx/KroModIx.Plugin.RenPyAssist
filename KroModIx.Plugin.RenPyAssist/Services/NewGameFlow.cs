@@ -1,4 +1,5 @@
 using System;
+using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
 using KroModIx.Plugin.Contracts;
@@ -23,13 +24,16 @@ public sealed class NewGameFlow
     private readonly RenPySettingsService _settings;
     private readonly IHostServices _host;
 
+    private readonly LinuxRuntimeInstaller _runtime;
+
     public NewGameFlow(GameInstallService installer, GamesRegistry registry,
-        RenPySettingsService settings, IHostServices host)
+        RenPySettingsService settings, IHostServices host, LinuxRuntimeInstaller runtime)
     {
         _installer = installer;
         _registry = registry;
         _settings = settings;
         _host = host;
+        _runtime = runtime;
     }
 
     /// <summary>Führt den Ablauf aus. Bricht der User irgendwo ab, passiert
@@ -78,6 +82,37 @@ public sealed class NewGameFlow
             await _host.Dialogs.ShowMessageAsync(
                 Strings.T("dialog.new_game_fail"), res.Error ?? "");
             return;
+        }
+
+        // v0.30.0: Windows-only-Build? Dann fehlt die Linux-Runtime ganz und
+        // das Spiel waere nicht startbar. Nachruesten, solange der Nutzer
+        // ohnehin wartet — hinterher faellt es ihm als „startet nicht" auf
+        // die Fuesse, ohne dass die Ursache sichtbar waere.
+        var buildDir = Path.Combine(res.ContainerPath, res.SubPath ?? "");
+        var inspection = RenPyBuildInspector.Inspect(buildDir);
+        if (inspection.IsWindowsOnly)
+        {
+            var veto = _runtime.Veto(buildDir, inspection);
+            if (veto is not null)
+            {
+                _host.Logger.Info("Windows-only-Build, aber nicht nachruestbar: {Grund}", veto);
+                await _host.Dialogs.ShowMessageAsync(Strings.T("runtime.found_title"),
+                    $"{wunsch.DisplayName}: {veto}");
+            }
+            else
+            {
+                progress.SetIndeterminate(Strings.T("runtime.step_copy"));
+                var fix = await _runtime.FixAsync(buildDir, inspection,
+                    m => progress.SetIndeterminate(m), ct).ConfigureAwait(true);
+                if (fix.Success)
+                    _host.Notifications.Notify(
+                        string.Format(Strings.T("runtime.done"), wunsch.DisplayName,
+                            GameUninstallService.FormatSize(fix.BytesAdded)),
+                        NotificationLevel.Success);
+                else
+                    await _host.Dialogs.ShowMessageAsync(Strings.T("runtime.fail_title"),
+                        $"{wunsch.DisplayName}: {fix.Error}");
+            }
         }
 
         // Registry zuerst: dann traegt die Kachel ab der ersten Sekunde
